@@ -77,7 +77,6 @@ export default function DataCapturePage() {
         return; 
       } else {
         addToHistory(`Uploaded document: ${file.name}`);
-        // For documents, we immediately try to process.
         // Initialize with empty structure for loading state.
         setOutputData({ type: 'documentAnalysis', content: { extractedTable: { headers: [], rows: [] }, fullText: "" }, previewUrl: undefined });
         result = await handleDocumentUpload(dataUri);
@@ -101,7 +100,6 @@ export default function DataCapturePage() {
     setIsLoading(prev => ({ ...prev, imageAnalysis: true }));
     
     addToHistory('Extracting data from image.');
-    // Initialize with empty structure for loading state, keep previewUrl
     setOutputData(prev => ({ ...prev!, type: 'imageAnalysis', content: { table: { headers: [], rows: [] }, fullText: "" } })); 
     const result = await handleImageUpload(outputData.previewUrl);
 
@@ -109,7 +107,7 @@ export default function DataCapturePage() {
       setOutputData({ type: 'imageAnalysis', content: result.data as ExtractStructuredDataFromImageOutput, previewUrl: outputData.previewUrl });
       toast({ title: "Image Analyzed", description: "Data extraction complete." });
     } else {
-      setOutputData({ type: 'error', content: result.error, previewUrl: outputData.previewUrl }); // Keep previewUrl on error
+      setOutputData({ type: 'error', content: result.error, previewUrl: outputData.previewUrl }); 
       toast({ variant: "destructive", title: "Image Analysis Error", description: result.error });
     }
     setIsLoading(prev => ({ ...prev, imageAnalysis: false }));
@@ -390,8 +388,6 @@ export default function DataCapturePage() {
             case 'text':
               return <p className="text-foreground whitespace-pre-wrap">{outputData.content}</p>;
             case 'imageAnalysis': 
-              // This case is primarily hit if previewUrl wasn't set when the more specific layout was checked,
-              // or if it's still loading initial content before the detailed layout kicks in.
               if (isLoadingAnalysis || !outputData.content) {
                  return (
                     <div>
@@ -405,13 +401,7 @@ export default function DataCapturePage() {
                     </div>
                 );
               }
-              // Fallback display if not handled by the primary imageAnalysis block.
-              // Should ideally be covered by the top-level imageAnalysis check.
               return <p className="text-muted-foreground">Image analysis results are being processed or displayed above.</p>;
-            
-            // Document analysis is now handled by its own specific block above this switch
-            // case 'documentAnalysis': ...
-
             case 'imagePreview':
               if (isLoading.imageUpload || isLoading.imageCapture) {
                 return <p>Processing image...</p>;
@@ -432,9 +422,6 @@ export default function DataCapturePage() {
                 </div>
               );
             default:
-              // This will catch 'documentAnalysis' if not handled by its specific block above,
-              // or any other unhandled type.
-              // For loading general states not covered by imagePreview or initial analysis skeletons:
                if (isLoading.search || Object.values(isLoading).some(val => val === true && !outputData)) {
                  return (
                     <div className="space-y-2">
@@ -546,7 +533,7 @@ export default function DataCapturePage() {
                   <CardTitle>Result</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ScrollArea className="max-h-[50rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-8rem)] p-1">
+                  <ScrollArea className="max-h-[60rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-6rem)] p-1">
                    {renderOutput()}
                   </ScrollArea>
                 </CardContent>
