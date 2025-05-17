@@ -20,11 +20,13 @@ import {
   Camera as CameraIcon,
   Search,
   RefreshCw,
-  FileText,
+  FileText as FileTextIcon, // Renamed to avoid conflict with component
   Loader2,
   AlertTriangle,
   Video,
   VideoOff,
+  FileSpreadsheet, // For CSV download
+  Printer, // For PDF download
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -34,6 +36,7 @@ import type { AnalyzeUploadedDocumentOutput } from "@/ai/flows/analyze-uploaded-
 import DataTable from '@/components/DataTable';
 import { storage } from '@/lib/firebase'; // Import Firebase storage
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import jsPDF from 'jspdf';
 
 
 type OutputType = 'text' | 'imageAnalysis' | 'documentAnalysis' | 'imagePreview' | 'error';
@@ -112,46 +115,20 @@ export default function DataCapturePage() {
     setIsLoading(prev => ({ ...prev, imageAnalysis: true }));
 
     addToHistory('Extracting data from image.');
-     // Keep existing previewUrl, indicate analysis is for table and fullText
     setOutputData(prev => ({ 
         ...prev!, 
         type: 'imageAnalysis', 
         content: { table: { headers: [], rows: [] }, fullText: "" } 
-        // previewUrl is preserved from 'imagePreview' state
     }));
-
-    // If it's a local data URI, it needs to be passed to the analysis function.
-    // If it's already a Firebase URL, the analysis function might not need it if it's just for display.
-    // Assuming handleImageUpload expects a data URI for analysis.
-    // If the previewUrl is already a Firebase URL, we might need a different approach or
-    // re-fetch image data if analysis needs the raw bytes again.
-    // For now, let's assume analysis always happens on a data URI.
-    // If outputData.previewUrl could be a firebase URL, ensure it's a dataURI before calling handleImageUpload
     
     let dataUriToAnalyze = outputData.previewUrl;
-    if (outputData.isFirebaseUrl) {
-        // This is a simplification. In a real scenario, you might need to re-download
-        // or have a mechanism to analyze from URL if the AI service supports it.
-        // Or, analyze before uploading to Firebase if analysis needs local data.
-        // For this iteration, we'll assume if it's a Firebase URL, the original data URI is lost for direct analysis.
-        // This scenario needs more robust handling based on AI capabilities.
-        // For now, if it's a Firebase URL, let's assume analysis was done *before* upload or is not possible again this way.
-        // So, we'll proceed with analysis only if it's NOT a Firebase URL.
-        // A better flow: capture -> (optional analysis) -> upload -> show Firebase URL & (optionally re-analyze if possible)
-        // Let's refine: if it's a firebase URL, we assume analysis was done on a local Data URI before upload
-        // The 'Extract Table Data' button might imply re-analysis or first-time analysis of the *displayed* image.
-        // For this iteration, we will use the current previewUrl for analysis, regardless of its origin.
-        // The AI flow should be robust to handle this or the `handleImageUpload` should manage it.
-    }
-
     const result = await handleImageUpload(dataUriToAnalyze);
-
 
     if (result.success) {
       setOutputData({ 
         type: 'imageAnalysis', 
         content: result.data as ExtractStructuredDataFromImageOutput, 
-        previewUrl: outputData.previewUrl, // Keep the existing preview URL
+        previewUrl: outputData.previewUrl, 
         isFirebaseUrl: outputData.isFirebaseUrl 
       });
       toast({ title: "Image Analyzed", description: "Data extraction complete." });
@@ -159,7 +136,7 @@ export default function DataCapturePage() {
       setOutputData({ 
         type: 'error', 
         content: result.error, 
-        previewUrl: outputData.previewUrl, // Keep the existing preview URL
+        previewUrl: outputData.previewUrl,
         isFirebaseUrl: outputData.isFirebaseUrl 
       });
       toast({ variant: "destructive", title: "Image Analysis Error", description: result.error });
@@ -236,7 +213,6 @@ export default function DataCapturePage() {
       if (recognitionRef.current) {
         recognitionRef.current.abort(); 
       }
-      // Stop camera stream on component unmount if active
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
@@ -273,7 +249,7 @@ export default function DataCapturePage() {
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(e => console.error("Error playing video:", e)); // Autoplay might be blocked
+        videoRef.current.play().catch(e => console.error("Error playing video:", e));
       }
       setHasCameraPermission(true);
       setCameraStreamState('active');
@@ -325,10 +301,7 @@ export default function DataCapturePage() {
       videoRef.current.srcObject = null;
     }
     setCameraStreamState('inactive');
-    // Optionally reset hasCameraPermission if you want to re-check next time
-    // setHasCameraPermission(null); 
   };
-
 
   const takePhoto = async () => {
     if (cameraStreamState !== 'active' || !videoRef.current || !canvasRef.current || !hasCameraPermission) {
@@ -349,7 +322,6 @@ export default function DataCapturePage() {
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       
       setIsLoading(prev => ({ ...prev, imageCaptureFirebase: true }));
-      // Display local data URI first for immediate feedback
       const localDataUri = canvas.toDataURL('image/png');
       setOutputData({ type: 'imagePreview', content: null, previewUrl: localDataUri, isFirebaseUrl: false });
       addToHistory('Captured photo. Uploading to cloud...');
@@ -373,9 +345,7 @@ export default function DataCapturePage() {
         } catch (error) {
           console.error("Error uploading to Firebase Storage:", error);
           toast({ variant: "destructive", title: "Upload Failed", description: "Could not store image in the cloud." });
-          // Keep local data URI in preview if upload fails
           setOutputData({ type: 'imagePreview', content: null, previewUrl: localDataUri, isFirebaseUrl: false });
-
         } finally {
           setIsLoading(prev => ({ ...prev, imageCaptureFirebase: false }));
         }
@@ -385,16 +355,161 @@ export default function DataCapturePage() {
 
   const refreshPage = () => window.location.reload();
 
+  const escapeCSVCell = (cellData: any): string => {
+    if (cellData == null) return '';
+    const str = String(cellData);
+    if (str.includes(',') || str.includes('\n') || str.includes('"')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const handleDownloadCSV = (data: ExtractStructuredDataFromImageOutput | AnalyzeUploadedDocumentOutput | null) => {
+    if (!data) return;
+    const tableSource = (data as ExtractStructuredDataFromImageOutput).table || (data as AnalyzeUploadedDocumentOutput).extractedTable;
+    
+    if (!tableSource || !tableSource.headers || !tableSource.rows) {
+      toast({ variant: "destructive", title: "CSV Export Error", description: "No table data available to export." });
+      return;
+    }
+
+    const { headers, rows } = tableSource;
+    let csvContent = headers.map(escapeCSVCell).join(',') + '\n';
+    rows.forEach(row => {
+      csvContent += row.map(escapeCSVCell).join(',') + '\n';
+    });
+
+    // Optionally add fullText to CSV
+    // if (data.fullText) {
+    //   csvContent += '\n\nFull Extracted Text:\n';
+    //   csvContent += `"${escapeCSVCell(data.fullText)}"\n`;
+    // }
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", "extracted_data.csv");
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+    toast({ title: "CSV Downloaded", description: "Data exported as CSV." });
+  };
+
+  const handleDownloadPDF = (data: ExtractStructuredDataFromImageOutput | AnalyzeUploadedDocumentOutput | null) => {
+    if (!data) return;
+    const tableSource = (data as ExtractStructuredDataFromImageOutput).table || (data as AnalyzeUploadedDocumentOutput).extractedTable;
+    const fullText = data.fullText;
+
+    if (!tableSource && !fullText) {
+        toast({ variant: "destructive", title: "PDF Export Error", description: "No data available to export." });
+        return;
+    }
+    
+    const pdf = new jsPDF();
+    let yPos = 15;
+    const lineHeight = 7;
+    const pageHeight = pdf.internal.pageSize.height;
+    const margin = 10;
+    const usableWidth = pdf.internal.pageSize.width - margin * 2;
+
+    pdf.setFontSize(16);
+    pdf.text("Extracted Data Report", margin, yPos);
+    yPos += lineHeight * 2;
+    pdf.setFontSize(10);
+
+    if (tableSource && tableSource.headers && tableSource.rows) {
+      const { headers, rows } = tableSource;
+      pdf.setFontSize(12);
+      pdf.text("Structured Table Data:", margin, yPos);
+      yPos += lineHeight * 1.5;
+      pdf.setFontSize(8);
+
+      // Basic table rendering
+      const colWidth = usableWidth / Math.max(1, headers.length);
+      headers.forEach((header, index) => {
+        const headerLines = pdf.splitTextToSize(String(header), colWidth - 2);
+        pdf.text(headerLines, margin + index * colWidth, yPos);
+      });
+      yPos += lineHeight * (pdf.splitTextToSize(headers.join(' '), usableWidth).length); // Estimate header height
+
+      rows.forEach(row => {
+        if (yPos > pageHeight - margin - lineHeight * 2) { // Check for page break before row
+          pdf.addPage();
+          yPos = margin;
+          pdf.setFontSize(12);
+          pdf.text("Structured Table Data (Continued)", margin, yPos);
+          yPos += lineHeight * 1.5;
+          pdf.setFontSize(8);
+          headers.forEach((header, index) => { // Re-add headers
+            const headerLines = pdf.splitTextToSize(String(header), colWidth - 2);
+            pdf.text(headerLines, margin + index * colWidth, yPos);
+          });
+          yPos += lineHeight * (pdf.splitTextToSize(headers.join(' '), usableWidth).length);
+        }
+        let maxRowHeight = lineHeight;
+        row.forEach((cell, index) => {
+          const cellLines = pdf.splitTextToSize(String(cell), colWidth - 2);
+          pdf.text(cellLines, margin + index * colWidth, yPos);
+          if (cellLines.length * lineHeight > maxRowHeight) {
+            maxRowHeight = cellLines.length * lineHeight;
+          }
+        });
+        yPos += maxRowHeight;
+      });
+      yPos += lineHeight; // Extra space after table
+    }
+
+    if (fullText) {
+      if (yPos > pageHeight - margin - lineHeight * 3) {
+        pdf.addPage();
+        yPos = margin;
+      }
+      pdf.setFontSize(12);
+      pdf.text("Full Extracted Text:", margin, yPos);
+      yPos += lineHeight * 1.5;
+      pdf.setFontSize(10);
+      const textLines = pdf.splitTextToSize(fullText, usableWidth);
+      textLines.forEach((line: string) => {
+        if (yPos > pageHeight - margin) {
+          pdf.addPage();
+          yPos = margin;
+        }
+        pdf.text(line, margin, yPos);
+        yPos += lineHeight;
+      });
+    }
+
+    pdf.save("extracted_data.pdf");
+    toast({ title: "PDF Downloaded", description: "Data exported as PDF." });
+  };
+
+
   const renderOutput = () => {
     if (!outputData && !Object.values(isLoading).some(Boolean)) return null;
 
     const isLoadingAnalysis = isLoading.imageAnalysis;
     const isLoadingDoc = isLoading.documentUpload;
     const isLoadingFirebaseUpload = isLoading.imageCaptureFirebase;
+    
+    const analysisData = outputData?.content as ExtractStructuredDataFromImageOutput | null;
+    const docData = outputData?.content as AnalyzeUploadedDocumentOutput | null;
+
+    const showDownloadButtons = 
+      outputData && !isLoadingAnalysis && !isLoadingDoc && !isLoadingFirebaseUpload &&
+      (
+        (outputData.type === 'imageAnalysis' && analysisData && (analysisData.table?.rows?.length > 0 || analysisData.fullText)) ||
+        (outputData.type === 'documentAnalysis' && docData && (docData.extractedTable?.rows?.length > 0 || docData.fullText))
+      );
+
+    const currentDataForDownload = outputData?.content;
 
 
     if (outputData?.type === 'imageAnalysis' && outputData.previewUrl) {
-      const analysisData = outputData.content as ExtractStructuredDataFromImageOutput | null;
       const tableData = analysisData?.table;
       const hasTableData = !!(tableData && tableData.headers && tableData.headers.length > 0 && tableData.rows && tableData.rows.length > 0);
       const hasFullText = !!(analysisData?.fullText && analysisData.fullText.trim() !== '');
@@ -404,7 +519,7 @@ export default function DataCapturePage() {
           <div className="flex flex-col md:flex-row md:gap-6 mb-4">
             <div className="md:w-1/3 mb-4 md:mb-0 flex flex-col items-center md:items-start">
               <p className="font-semibold mb-2 text-lg text-center md:text-left">
-                {isLoadingAnalysis || !analysisData ? "Analyzing..." : "Analyzed Image"}
+                {isLoadingAnalysis || !analysisData ? "Analyzing for structured data. Analyzing for full data." : "Analyzed Image"}
               </p>
               <Image src={outputData.previewUrl} alt="Analyzed preview" width={150} height={100} className="rounded-md border object-contain" data-ai-hint="document user content"/>
             </div>
@@ -441,12 +556,22 @@ export default function DataCapturePage() {
           {!(isLoadingAnalysis || !analysisData) && !hasTableData && !hasFullText && (
              <p className="text-muted-foreground mt-4">No structured table or full text extracted from the image.</p>
           )}
+
+          {showDownloadButtons && (
+            <div className="mt-6 flex gap-2">
+              <Button onClick={() => handleDownloadCSV(currentDataForDownload)} variant="outline">
+                <FileSpreadsheet className="mr-2 h-4 w-4" /> Download CSV
+              </Button>
+              <Button onClick={() => handleDownloadPDF(currentDataForDownload)} variant="outline">
+                <Printer className="mr-2 h-4 w-4" /> Download PDF
+              </Button>
+            </div>
+          )}
         </>
       );
     }
 
     if (outputData?.type === 'documentAnalysis') {
-        const docData = outputData.content as AnalyzeUploadedDocumentOutput | null;
         const docTable = docData?.extractedTable;
         const hasDocTableData = !!(docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows && docTable.rows.length > 0);
         const hasDocFullText = !!(docData?.fullText && docData.fullText.trim() !== '');
@@ -482,6 +607,17 @@ export default function DataCapturePage() {
             {!(isLoadingDoc || !docData) && !hasDocTableData && !hasDocFullText && (
                <p className="text-muted-foreground mt-4">No table data or full text extracted from the document.</p>
             )}
+
+            {showDownloadButtons && (
+                <div className="mt-6 flex gap-2">
+                <Button onClick={() => handleDownloadCSV(currentDataForDownload)} variant="outline">
+                    <FileSpreadsheet className="mr-2 h-4 w-4" /> Download CSV
+                </Button>
+                <Button onClick={() => handleDownloadPDF(currentDataForDownload)} variant="outline">
+                    <Printer className="mr-2 h-4 w-4" /> Download PDF
+                </Button>
+                </div>
+            )}
            </div>
         );
     }
@@ -490,6 +626,7 @@ export default function DataCapturePage() {
         if (isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoadingDoc || isLoadingAnalysis || isLoading.search || isLoading.cameraStart) {
             const message = isLoading.imageCaptureFirebase ? "Uploading image to cloud..." : 
                             isLoading.cameraStart ? "Starting camera..." : 
+                            (isLoadingAnalysis || isLoadingDoc) ? "Analyzing for structured data. Analyzing for full data." :
                             "Processing...";
             return (
                 <div className="space-y-2">
@@ -519,7 +656,7 @@ export default function DataCapturePage() {
           <div className="mb-4 flex flex-col items-center md:items-start">
             <p className="font-semibold mb-2 text-lg text-center md:text-left">
               {outputData.type === 'imagePreview' && !isLoadingAnalysis && !isLoadingFirebaseUpload ? "Preview" :
-               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing..." : 
+               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing for structured data. Analyzing for full data." : 
                (outputData.type === 'imagePreview' && isLoadingFirebaseUpload) ? "Uploading to Cloud..." :
                outputData.type === 'error' ? "Image with Error" :
                "Image"
@@ -560,7 +697,7 @@ export default function DataCapturePage() {
                     </div>
                 );
               }
-              // The detailed display is handled above, this is a fallback.
+              // The detailed display is handled above, this is a fallback if that section somehow isn't rendered.
               return <p className="text-muted-foreground">Image analysis results are displayed above.</p>;
             case 'imagePreview':
               if (isLoading.imageUpload || isLoadingFirebaseUpload) {
@@ -603,7 +740,6 @@ export default function DataCapturePage() {
     );
   };
 
-
   return (
     <>
       <div className="container mx-auto p-4 flex-grow">
@@ -642,7 +778,7 @@ export default function DataCapturePage() {
                       <input type="file" ref={imageInputRef} onChange={(e) => handleFileChange(e, 'image')} accept="image/*" className="hidden" />
 
                       <Button onClick={() => documentInputRef.current?.click()} disabled={isLoading.documentUpload} className="flex-grow sm:flex-grow-0">
-                      {isLoading.documentUpload ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                      {isLoading.documentUpload ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileTextIcon className="mr-2 h-4 w-4" />}
                       Upload Document
                       </Button>
                       <input type="file" ref={documentInputRef} onChange={(e) => handleFileChange(e, 'document')} accept=".pdf,.csv,.xls,.xlsx,.doc,.docx,.txt" className="hidden" />
@@ -653,7 +789,6 @@ export default function DataCapturePage() {
                       </Button>
                   </div>
 
-                  {/* Camera Controls */}
                   <div className="flex flex-wrap gap-2 justify-center">
                     {cameraStreamState === 'inactive' && (
                         <Button onClick={startCamera} disabled={isLoading.cameraStart} className="flex-grow sm:flex-grow-0">
@@ -683,7 +818,6 @@ export default function DataCapturePage() {
                     )}
                   </div>
 
-
                   <div className="flex gap-2 items-center">
                       <Input
                       type="text"
@@ -707,7 +841,7 @@ export default function DataCapturePage() {
                   <CardTitle>Live Camera Feed {cameraStreamState === 'paused' && '(Paused)'}</CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 space-y-4">
-                  <video ref={videoRef} playsInline className="w-full h-auto aspect-video bg-muted rounded-md border" />
+                  <video ref={videoRef} playsInline autoPlay muted className="w-full h-auto aspect-video bg-muted rounded-md border" />
                   <canvas ref={canvasRef} className="hidden" />
                   {cameraStreamState !== 'inactive' && hasCameraPermission === false && (
                     <Alert variant="destructive" className="rounded-md">
@@ -747,4 +881,3 @@ export default function DataCapturePage() {
     </>
   );
 }
-
