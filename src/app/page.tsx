@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from "@/hooks/use-toast";
+import { jsPDF } from "jspdf";
 import {
   Upload,
   Mic,
@@ -22,11 +23,12 @@ import {
   FileText,
   Loader2,
   AlertTriangle,
+  FileSignature, // Icon for handwriting
 } from "lucide-react";
-import { handleTextQuery, handleImageUpload, handleDocumentUpload, ActionResult } from './actions';
+import { handleTextQuery, handleImageUpload, handleDocumentUpload, handleHandwritingTranscription, ActionResult } from './actions';
 import DataTable from '@/components/DataTable';
 
-type OutputType = 'text' | 'imageAnalysis' | 'documentAnalysis' | 'imagePreview' | 'error';
+type OutputType = 'text' | 'imageAnalysis' | 'documentAnalysis' | 'imagePreview' | 'handwritingTranscription' | 'error';
 interface OutputData {
   type: OutputType;
   content: any;
@@ -60,7 +62,7 @@ export default function DataCapturePage() {
 
     const loaderKey = fileType === 'image' ? 'imageUpload' : 'documentUpload';
     setIsLoading(prev => ({ ...prev, [loaderKey]: true }));
-    setOutputData(null); // Clear previous output
+    setOutputData(null); 
 
     const reader = new FileReader();
     reader.onloadend = async () => {
@@ -70,15 +72,18 @@ export default function DataCapturePage() {
       if (fileType === 'image') {
         addToHistory(`Uploaded image: ${file.name}`);
         setOutputData({ type: 'imagePreview', content: null, previewUrl: dataUri });
-        result = await handleImageUpload(dataUri);
+        // We preview first, user can then choose to analyze for structured data or handwriting
+        setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
+        // Deferring actual analysis to a button click (handleImageAnalysis or handlePdfTranscription)
+        return; 
       } else {
         addToHistory(`Uploaded document: ${file.name}`);
         result = await handleDocumentUpload(dataUri);
       }
 
       if (result.success) {
-        setOutputData({ type: result.type as OutputType, content: result.data, previewUrl: fileType === 'image' ? dataUri : undefined });
-        toast({ title: `${fileType === 'image' ? "Image" : "Document"} Processed`, description: `${fileType === 'image' ? "Image" : "Document"} analysis complete.` });
+        setOutputData({ type: result.type as OutputType, content: result.data });
+        toast({ title: `${fileType === 'document' ? "Document" : "Item"} Processed`, description: `${fileType === 'document' ? "Document" : "Item"} analysis complete.` });
       } else {
         setOutputData({ type: 'error', content: result.error });
         toast({ variant: "destructive", title: "Processing Error", description: result.error });
@@ -86,8 +91,49 @@ export default function DataCapturePage() {
       setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
     };
     reader.readAsDataURL(file);
-    event.target.value = ""; // Reset file input
+    event.target.value = ""; 
   };
+
+  const handleImageAnalysis = async () => {
+    if (!outputData?.previewUrl) return;
+    setIsLoading(prev => ({ ...prev, imageAnalysis: true }));
+    
+    const result = await handleImageUpload(outputData.previewUrl);
+    if (result.success) {
+      setOutputData({ type: 'imageAnalysis', content: result.data, previewUrl: outputData.previewUrl });
+      toast({ title: "Image Analyzed", description: "Structured data extracted." });
+    } else {
+      setOutputData({ type: 'error', content: result.error, previewUrl: outputData.previewUrl });
+      toast({ variant: "destructive", title: "Image Analysis Error", description: result.error });
+    }
+    setIsLoading(prev => ({ ...prev, imageAnalysis: false }));
+  };
+  
+  const handlePdfTranscription = async () => {
+    if (!outputData?.previewUrl) return;
+    setIsLoading(prev => ({ ...prev, handwritingTranscription: true }));
+
+    addToHistory('Transcribing handwriting from image for PDF.');
+    const result = await handleHandwritingTranscription(outputData.previewUrl);
+
+    if (result.success && result.data) {
+      const transcribedText = result.data as string;
+      setOutputData({ type: 'handwritingTranscription', content: transcribedText, previewUrl: outputData.previewUrl });
+      
+      const pdf = new jsPDF();
+      // Basic text splitting to avoid overflow, more sophisticated handling might be needed for long texts
+      const lines = pdf.splitTextToSize(transcribedText, 180); // 180 is approx width in mm for A4
+      pdf.text(lines, 10, 10);
+      pdf.save("handwritten_transcription.pdf");
+
+      toast({ title: "Handwriting Transcribed", description: "PDF generated and download initiated." });
+    } else {
+      setOutputData({ type: 'error', content: result.error || "Failed to transcribe or generate PDF.", previewUrl: outputData.previewUrl });
+      toast({ variant: "destructive", title: "Transcription Error", description: result.error || "Could not transcribe handwriting." });
+    }
+    setIsLoading(prev => ({ ...prev, handwritingTranscription: false }));
+  };
+
 
   const handleSearch = async () => {
     if (!inputValue.trim()) return;
@@ -116,7 +162,7 @@ export default function DataCapturePage() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognitionRef.current = new SpeechRecognition();
     const recognition = recognitionRef.current;
-    recognition.continuous = false; // Set to false to stop after first result for simplicity
+    recognition.continuous = false; 
     recognition.interimResults = true;
 
     recognition.onstart = () => {
@@ -136,11 +182,8 @@ export default function DataCapturePage() {
       }
       setOutputData({ type: 'text', content: interimTranscript || finalTranscript || 'Listening...' });
       if (finalTranscript) {
-        setInputValue(finalTranscript); // Populate input field
-        recognition.stop(); // Stop recognition after final result
-        // Optionally, trigger search automatically:
-        // setInputValue(finalTranscript); // Keep this line
-        // handleTextQuery(finalTranscript).then(result => { ... }); // Call search directly
+        setInputValue(finalTranscript); 
+        recognition.stop(); 
       }
     };
 
@@ -208,22 +251,11 @@ export default function DataCapturePage() {
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUri = canvas.toDataURL('image/png');
       
-      setIsLoading(prev => ({ ...prev, imageCapture: true }));
+      setIsLoading(prev => ({ ...prev, imageCapture: true })); // Using a generic imageCapture key
       setOutputData({ type: 'imagePreview', content: null, previewUrl: dataUri });
-      addToHistory('Captured photo for analysis.');
-      
-      const result = await handleImageUpload(dataUri);
-      if (result.success) {
-        setOutputData({ type: 'imageAnalysis', content: result.data, previewUrl: dataUri });
-        toast({ title: "Photo Processed", description: "Photo analysis complete." });
-      } else {
-        setOutputData({ type: 'error', content: result.error });
-        toast({ variant: "destructive", title: "Processing Error", description: result.error });
-      }
+      addToHistory('Captured photo from camera.');
+      // Defer analysis to button click
       setIsLoading(prev => ({ ...prev, imageCapture: false }));
-
-      // Optionally stop camera after taking photo
-      // toggleCamera(); 
     }
   };
   
@@ -232,50 +264,82 @@ export default function DataCapturePage() {
   const renderOutput = () => {
     if (!outputData) return null;
 
-    switch (outputData.type) {
-      case 'text':
-        return <p className="text-foreground whitespace-pre-wrap">{outputData.content}</p>;
-      case 'imageAnalysis':
-        return (
-          <div>
-            {outputData.previewUrl && (
-              <div className="mb-4">
-                <p className="font-semibold mb-2">Preview:</p>
-                <Image src={outputData.previewUrl} alt="Uploaded preview" width={300} height={200} className="rounded-md border" data-ai-hint="abstract data" />
-              </div>
-            )}
-            <DataTable data={outputData.content} caption="Extracted Image Data" />
+    const showImageActions = outputData.previewUrl && (outputData.type === 'imagePreview' || outputData.type === 'imageAnalysis' || outputData.type === 'handwritingTranscription' || (outputData.type === 'error' && outputData.previewUrl));
+
+    return (
+      <>
+        {outputData.previewUrl && (
+          <div className="mb-4">
+            <p className="font-semibold mb-2">
+              {outputData.type === 'imagePreview' && !isLoading.imageAnalysis && !isLoading.handwritingTranscription ? "Preview:" : 
+               outputData.type === 'imageAnalysis' ? "Analyzed Image:" :
+               outputData.type === 'handwritingTranscription' ? "Transcribed Image:" :
+               isLoading.imageAnalysis ? "Analyzing for structured data..." :
+               isLoading.handwritingTranscription ? "Transcribing handwriting..." :
+               "Image:"
+              }
+            </p>
+            <Image src={outputData.previewUrl} alt="Uploaded/Captured preview" width={300} height={200} className="rounded-md border" data-ai-hint="document user content" />
           </div>
-        );
-      case 'documentAnalysis':
-        return (
-           <div>
-            <p className="font-semibold mb-2">Document Analysis Result:</p>
-            <pre className="whitespace-pre-wrap bg-muted p-4 rounded-md text-sm">{outputData.content}</pre>
-           </div>
-        );
-      case 'imagePreview':
-         return (
-            <div>
-              <p className="font-semibold mb-2">Image Preview (processing...):</p>
-              <Image src={outputData.previewUrl!} alt="Processing preview" width={300} height={200} className="rounded-md border" data-ai-hint="document scan"/>
-            </div>
-          );
-      case 'error':
-        return (
-          <div className="flex items-center text-destructive">
-            <AlertTriangle className="mr-2 h-5 w-5" />
-            <p>{outputData.content}</p>
+        )}
+
+        {showImageActions && (
+          <div className="flex gap-2 mb-4">
+            <Button onClick={handleImageAnalysis} disabled={isLoading.imageAnalysis || isLoading.handwritingTranscription}>
+              {isLoading.imageAnalysis ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+              Extract Table Data
+            </Button>
+            <Button onClick={handlePdfTranscription} disabled={isLoading.handwritingTranscription || isLoading.imageAnalysis}>
+              {isLoading.handwritingTranscription ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSignature className="mr-2 h-4 w-4" />}
+              Create PDF from Handwriting
+            </Button>
           </div>
-        );
-      default:
-        return null;
-    }
+        )}
+
+        {(() => {
+          switch (outputData.type) {
+            case 'text':
+              return <p className="text-foreground whitespace-pre-wrap">{outputData.content}</p>;
+            case 'imageAnalysis':
+              return <DataTable data={outputData.content} caption="Extracted Image Data (Table Format)" />;
+            case 'documentAnalysis':
+              return (
+                 <div>
+                  <p className="font-semibold mb-2">Document Analysis Result:</p>
+                  <pre className="whitespace-pre-wrap bg-muted p-4 rounded-md text-sm">{outputData.content}</pre>
+                 </div>
+              );
+            case 'handwritingTranscription':
+              return (
+                <div>
+                  <p className="font-semibold mb-2">Transcribed Handwriting:</p>
+                  <pre className="whitespace-pre-wrap bg-muted p-4 rounded-md text-sm">{outputData.content}</pre>
+                  <p className="text-sm text-muted-foreground mt-2">PDF download should have started.</p>
+                </div>
+              );
+            case 'imagePreview':
+              // Content already handled by preview and action buttons
+              if (isLoading.imageUpload || isLoading.imageCapture) {
+                return <p>Processing image...</p>;
+              }
+              return <p className="text-muted-foreground">Image ready. Choose an action above.</p>;
+            case 'error':
+              return (
+                <div className="flex items-center text-destructive">
+                  <AlertTriangle className="mr-2 h-5 w-5" />
+                  <p>{outputData.content}</p>
+                </div>
+              );
+            default:
+              return null;
+          }
+        })()}
+      </>
+    );
   };
 
   return (
     <div className="container mx-auto p-4 flex flex-col items-center min-h-[calc(100vh-var(--navbar-height,4rem))]">
-      {/* History Section */}
       <Card className="w-full max-w-3xl mb-6 shadow-lg">
         <CardHeader>
           <CardTitle>History</CardTitle>
@@ -296,14 +360,13 @@ export default function DataCapturePage() {
         </CardContent>
       </Card>
 
-      {/* Controls Container */}
       <Card className="w-full max-w-3xl mb-6 shadow-lg">
         <CardHeader>
             <CardTitle className="text-center">Data Capture Tools</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-2 justify-center">
-                <Button onClick={() => imageInputRef.current?.click()} disabled={isLoading.imageUpload} className="flex-grow sm:flex-grow-0">
+                <Button onClick={() => imageInputRef.current?.click()} disabled={isLoading.imageUpload || isLoading.imageCapture} className="flex-grow sm:flex-grow-0">
                 {isLoading.imageUpload ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
                 Upload Image
                 </Button>
@@ -326,7 +389,7 @@ export default function DataCapturePage() {
                 </Button>
 
                 {isCameraActive && (
-                <Button onClick={takePhoto} disabled={isLoading.imageCapture} className="flex-grow sm:flex-grow-0">
+                <Button onClick={takePhoto} disabled={isLoading.imageCapture || isLoading.imageAnalysis || isLoading.handwritingTranscription} className="flex-grow sm:flex-grow-0">
                     {isLoading.imageCapture ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
                     Take Photo
                 </Button>
@@ -350,16 +413,14 @@ export default function DataCapturePage() {
         </CardContent>
       </Card>
 
-      {/* Camera View */}
       {isCameraActive && (
         <div className="w-full max-w-md mb-6 rounded-lg overflow-hidden shadow-lg border border-border">
-          <video ref={videoRef} autoPlay playsInline className="w-full h-auto aspect-video bg-muted" />
+          <video ref={videoRef} autoPlay playsInline muted className="w-full h-auto aspect-video bg-muted" />
           <canvas ref={canvasRef} className="hidden" />
         </div>
       )}
       
-      {/* Output Area */}
-      {outputData && (
+      {(outputData || isLoading.imageAnalysis || isLoading.handwritingTranscription) && (
         <Card className="w-full max-w-3xl mb-6 shadow-lg">
           <CardHeader>
             <CardTitle>Result</CardTitle>
