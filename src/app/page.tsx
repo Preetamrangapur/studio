@@ -63,7 +63,7 @@ export default function DataCapturePage() {
 
     const loaderKey = fileType === 'image' ? 'imageUpload' : 'documentUpload';
     setIsLoading(prev => ({ ...prev, [loaderKey]: true }));
-    setOutputData(null);
+    setOutputData(null); // Clear previous output
 
     const reader = new FileReader();
     reader.onloadend = async () => {
@@ -72,10 +72,11 @@ export default function DataCapturePage() {
 
       if (fileType === 'image') {
         addToHistory(`Uploaded image: ${file.name}`);
+        // For images, show preview first, then analyze on demand
         setOutputData({ type: 'imagePreview', content: null, previewUrl: dataUri });
         setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
-        return;
-      } else {
+        return; // Stop here for images, analysis is separate
+      } else { // For documents, analyze immediately
         addToHistory(`Uploaded document: ${file.name}`);
         setOutputData({ type: 'documentAnalysis', content: { extractedTable: { headers: [], rows: [] }, fullText: "" }, previewUrl: undefined });
         result = await handleDocumentUpload(dataUri);
@@ -91,7 +92,7 @@ export default function DataCapturePage() {
       setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
     };
     reader.readAsDataURL(file);
-    event.target.value = "";
+    event.target.value = ""; // Reset file input
   };
 
   const handleImageAnalysis = async () => {
@@ -99,6 +100,7 @@ export default function DataCapturePage() {
     setIsLoading(prev => ({ ...prev, imageAnalysis: true }));
 
     addToHistory('Extracting data from image.');
+    // Initialize outputData for imageAnalysis to show skeletons immediately
     setOutputData(prev => ({ ...prev!, type: 'imageAnalysis', content: { table: { headers: [], rows: [] }, fullText: "" } }));
     const result = await handleImageUpload(outputData.previewUrl);
 
@@ -131,17 +133,18 @@ export default function DataCapturePage() {
   };
 
   useEffect(() => {
+    // Speech Recognition Setup
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       console.warn('Speech Recognition API is not supported in this browser.');
-      toast({ variant: "destructive", title: "Unsupported Feature", description: "Speech recognition is not supported in this browser." });
+      // toast({ variant: "destructive", title: "Unsupported Feature", description: "Speech recognition is not supported in this browser." });
       return;
     }
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognitionRef.current = new SpeechRecognition();
     const recognition = recognitionRef.current;
-    recognition.continuous = false;
-    recognition.interimResults = true;
+    recognition.continuous = false; // Stop after first final result
+    recognition.interimResults = true; // Show interim results
 
     recognition.onstart = () => {
       setIsRecording(true);
@@ -158,15 +161,16 @@ export default function DataCapturePage() {
           interimTranscript += event.results[i][0].transcript;
         }
       }
-      setOutputData({ type: 'text', content: interimTranscript || finalTranscript || 'Listening...' });
+      setOutputData({ type: 'text', content: interimTranscript || finalTranscript || 'Listening...' }); // Update with interim or final
       if (finalTranscript) {
-        setInputValue(finalTranscript);
-        recognition.stop();
+        setInputValue(finalTranscript); // Set to input field when final
+        recognition.stop(); // Stop recognition after final result
       }
     };
 
     recognition.onend = () => {
       setIsRecording(false);
+       // Clear "Listening..." if no final result was processed into inputValue
        if (outputData?.content === 'Listening...') {
          setOutputData(null);
        }
@@ -180,13 +184,14 @@ export default function DataCapturePage() {
     };
      return () => {
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        recognitionRef.current.abort(); // Ensure recognition is stopped on unmount
       }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
     };
-  }, [outputData?.content, toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toast]); // Added outputData?.content to dependencies was causing re-renders
 
 
   const toggleVoiceRecording = () => {
@@ -194,7 +199,13 @@ export default function DataCapturePage() {
     if (isRecording) {
       recognitionRef.current.stop();
     } else {
-      recognitionRef.current.start();
+      try {
+        recognitionRef.current.start();
+      } catch (e) {
+        // Handle error if recognition is already started or other issues
+        console.error("Error starting speech recognition:", e);
+        toast({ variant: "destructive", title: "Speech Error", description: "Could not start voice recording." });
+      }
     }
   };
 
@@ -232,7 +243,7 @@ export default function DataCapturePage() {
       setIsLoading(prev => ({ ...prev, imageCapture: true }));
       setOutputData({ type: 'imagePreview', content: null, previewUrl: dataUri });
       addToHistory('Captured photo from camera.');
-      setIsLoading(prev => ({ ...prev, imageCapture: false }));
+      setIsLoading(prev => ({ ...prev, imageCapture: false })); // This should be false after setting output
     }
   };
 
@@ -244,6 +255,7 @@ export default function DataCapturePage() {
     const isLoadingAnalysis = isLoading.imageAnalysis;
     const isLoadingDoc = isLoading.documentUpload;
 
+    // Image Analysis Output
     if (outputData?.type === 'imageAnalysis' && outputData.previewUrl) {
       const analysisData = outputData.content as ExtractStructuredDataFromImageOutput | null;
       const tableData = analysisData?.table;
@@ -296,6 +308,7 @@ export default function DataCapturePage() {
       );
     }
 
+    // Document Analysis Output
     if (outputData?.type === 'documentAnalysis') {
         const docData = outputData.content as AnalyzeUploadedDocumentOutput | null;
         const docTable = docData?.extractedTable;
@@ -338,13 +351,14 @@ export default function DataCapturePage() {
     }
 
 
-    if (!outputData) {
-        if (isLoading.imageUpload || isLoading.imageCapture || isLoadingDoc || isLoadingAnalysis) {
+    // Loading states or general output
+    if (!outputData) { // Show skeletons if any main action is loading and there's no outputData yet
+        if (isLoading.imageUpload || isLoading.imageCapture || isLoadingDoc || isLoadingAnalysis || isLoading.search) {
             return (
                 <div className="space-y-2">
                     <Skeleton className="h-8 w-1/3" />
                     <Skeleton className="h-20 w-full" />
-                    {(isLoadingDoc || isLoadingAnalysis) && (
+                    {(isLoadingDoc || isLoadingAnalysis) && ( // Show more skeletons if it's an analysis type
                       <>
                         <Skeleton className="h-8 w-1/4 mt-4" />
                         <Skeleton className="h-16 w-full" />
@@ -353,18 +367,19 @@ export default function DataCapturePage() {
                 </div>
             );
         }
-        return null;
+        return null; // No loading, no output
     }
 
+    // Image Preview (before analysis) or Error with Preview
     const showImageActions = outputData.previewUrl && (outputData.type === 'imagePreview' || (outputData.type === 'error' && outputData.previewUrl));
 
     return (
       <>
-        {outputData.previewUrl && outputData.type !== 'imageAnalysis' && (
+        {outputData.previewUrl && outputData.type !== 'imageAnalysis' && ( // Don't show preview again if analysis is already displayed
           <div className="mb-4 flex flex-col items-center md:items-start">
             <p className="font-semibold mb-2 text-lg text-center md:text-left">
               {outputData.type === 'imagePreview' && !isLoadingAnalysis ? "Preview" :
-               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing..." :
+               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing..." : // Show "Analyzing..." if preview is active during analysis
                outputData.type === 'error' ? "Image with Error" :
                "Image"
               }
@@ -382,13 +397,15 @@ export default function DataCapturePage() {
           </div>
         )}
 
+        {/* General text, specific messages for image preview, or error messages */}
         {(() => {
           switch (outputData.type) {
             case 'text':
               return <p className="text-foreground whitespace-pre-wrap">{outputData.content}</p>;
-            case 'imageAnalysis':
+            case 'imageAnalysis': // This case is now handled above with its specific layout
+              // This part will only show if somehow it falls through, e.g. no previewUrl but type is imageAnalysis
               if (isLoadingAnalysis || !outputData.content) {
-                 return (
+                 return ( // Fallback skeleton if imageAnalysis is active but content not ready and not handled by the main block
                     <div>
                         <p className="font-semibold mb-2 text-lg">Analyzing for structured data. Analyzing for full data.</p>
                         <div className="space-y-2">
@@ -400,15 +417,23 @@ export default function DataCapturePage() {
                     </div>
                 );
               }
+              // If data is ready, it's displayed in the specific block above.
+              // This message acts as a placeholder if the specific block isn't rendered for some reason.
               return <p className="text-muted-foreground">Image analysis results are being processed or displayed above.</p>;
             case 'imagePreview':
               if (isLoading.imageUpload || isLoading.imageCapture) {
                 return <p>Processing image...</p>;
               }
-              if (isLoadingAnalysis) {
-                return (
+              if (isLoadingAnalysis) { // If analysis started from preview
+                return ( // Show skeletons while analyzing
                     <div>
-                        <p className="text-muted-foreground mt-2">Waiting for analysis results...</p>
+                        <p className="font-semibold mb-2 text-lg">Analyzing for structured data. Analyzing for full data.</p>
+                        <div className="space-y-2">
+                            <Skeleton className="h-8 w-1/3" />
+                            <Skeleton className="h-20 w-full" />
+                            <Skeleton className="h-8 w-1/4 mt-4" />
+                            <Skeleton className="h-16 w-full" />
+                        </div>
                     </div>
                 );
               }
@@ -421,8 +446,9 @@ export default function DataCapturePage() {
                 </div>
               );
             default:
+               // This default case handles if isLoading.search is true but outputData isn't set yet
                if (isLoading.search || Object.values(isLoading).some(val => val === true && !outputData)) {
-                 return (
+                 return ( // Generic loading skeleton for search or other unhandled loading states
                     <div className="space-y-2">
                         <Skeleton className="h-8 w-1/3" />
                         <Skeleton className="h-20 w-full" />
@@ -532,7 +558,7 @@ export default function DataCapturePage() {
                   <CardTitle>Result</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ScrollArea className="max-h-[75rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-4rem)] p-1">
+                  <ScrollArea className="max-h-[90rem] lg:max-h-[calc(100vh-6rem)] p-1">
                    {renderOutput()}
                   </ScrollArea>
                 </CardContent>
