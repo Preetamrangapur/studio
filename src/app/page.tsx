@@ -303,7 +303,7 @@ export default function DataCapturePage() {
         const docData = outputData.content as AnalyzeUploadedDocumentOutput | null;
         const docTable = docData?.extractedTable;
         const hasDocTableData = !!(docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows && docTable.rows.length > 0);
-        const hasFullText = !!(docData?.fullText && docData.fullText.trim() !== '');
+        const hasDocFullText = !!(docData?.fullText && docData.fullText.trim() !== '');
 
         return (
            <div>
@@ -324,7 +324,7 @@ export default function DataCapturePage() {
                 <Skeleton className="h-8 w-1/4" />
                 <Skeleton className="h-16 w-full" />
               </div>
-            ) : hasFullText ? (
+            ) : hasDocFullText ? (
               <>
                 <h3 className="font-semibold mt-6 mb-2 text-lg">Full Extracted Text from Document</h3>
                 <ScrollArea className="h-auto max-h-60">
@@ -333,7 +333,7 @@ export default function DataCapturePage() {
               </>
             ) : null}
             
-            {!(isLoadingDoc || !docData) && !hasDocTableData && !hasFullText && (
+            {!(isLoadingDoc || !docData) && !hasDocTableData && !hasDocFullText && (
                <p className="text-muted-foreground mt-4">No table data or full text extracted from the document.</p>
             )}
            </div>
@@ -546,7 +546,7 @@ export default function DataCapturePage() {
                   <CardTitle>Result</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ScrollArea className="max-h-[40rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-10rem)] p-1"> {/* Added p-1 for slight padding */}
+                  <ScrollArea className="max-h-[50rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-8rem)] p-1">
                    {renderOutput()}
                   </ScrollArea>
                 </CardContent>
