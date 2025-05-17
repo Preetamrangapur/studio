@@ -99,14 +99,14 @@ export default function DataCapturePage() {
     setIsLoading(prev => ({ ...prev, imageAnalysis: true }));
     
     addToHistory('Extracting data from image.');
-    setOutputData(prev => ({ ...prev!, type: 'imageAnalysis', content: null }));
+    setOutputData(prev => ({ ...prev!, type: 'imageAnalysis', content: null })); // Keep previewUrl, set content to null
     const result = await handleImageUpload(outputData.previewUrl);
 
     if (result.success) {
       setOutputData({ type: 'imageAnalysis', content: result.data as ExtractStructuredDataFromImageOutput, previewUrl: outputData.previewUrl });
       toast({ title: "Image Analyzed", description: "Data extraction complete." });
     } else {
-      setOutputData({ type: 'error', content: result.error, previewUrl: outputData.previewUrl });
+      setOutputData({ type: 'error', content: result.error, previewUrl: outputData.previewUrl }); // Keep previewUrl on error
       toast({ variant: "destructive", title: "Image Analysis Error", description: result.error });
     }
     setIsLoading(prev => ({ ...prev, imageAnalysis: false }));
@@ -257,7 +257,7 @@ export default function DataCapturePage() {
               <p className="font-semibold mb-2 text-lg">
                 {isLoadingAnalysis || !analysisData ? "Analyzing for structured data. Analyzing for full data." : "Analyzed Image"}
               </p>
-              <Image src={outputData.previewUrl} alt="Analyzed preview" width={300} height={200} className="rounded-md border object-contain w-full" data-ai-hint="document user content" />
+              <Image src={outputData.previewUrl} alt="Analyzed preview" width={200} height={150} className="rounded-md border object-contain w-full" data-ai-hint="document user content" />
             </div>
 
             <div className="md:w-2/3">
@@ -321,7 +321,7 @@ export default function DataCapturePage() {
                "Image"
               }
             </p>
-            <Image src={outputData.previewUrl} alt="Uploaded/Captured preview" width={300} height={200} className="rounded-md border object-contain w-full" data-ai-hint="document user content" />
+            <Image src={outputData.previewUrl} alt="Uploaded/Captured preview" width={200} height={150} className="rounded-md border object-contain w-full" data-ai-hint="document user content" />
           </div>
         )}
 
