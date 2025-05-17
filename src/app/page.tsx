@@ -1,3 +1,4 @@
+
 // @ts-nocheck
 // TODO: Remove @ts-nocheck and fix errors
 "use client";
@@ -329,104 +330,114 @@ export default function DataCapturePage() {
   };
 
   return (
-    <div className="container mx-auto p-4 flex flex-col items-center min-h-[calc(100vh-var(--navbar-height,4rem))]">
-      <Card className="w-full max-w-3xl mb-6 shadow-lg">
-        <CardHeader>
-          <CardTitle>History</CardTitle>
-          <CardDescription>Your recent activities.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {history.length === 0 ? (
-            <p className="text-muted-foreground">No activity yet.</p>
-          ) : (
-            <ScrollArea className="h-32">
-              <ul className="space-y-1">
-                {history.map((item, index) => (
-                  <li key={index} className="text-sm text-muted-foreground truncate">{item}</li>
-                ))}
-              </ul>
-            </ScrollArea>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="w-full max-w-3xl mb-6 shadow-lg">
-        <CardHeader>
-            <CardTitle className="text-center">Data Capture Tools</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-2 justify-center">
-                <Button onClick={() => imageInputRef.current?.click()} disabled={isLoading.imageUpload || isLoading.imageCapture} className="flex-grow sm:flex-grow-0">
-                {isLoading.imageUpload ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                Upload Image
-                </Button>
-                <input type="file" ref={imageInputRef} onChange={(e) => handleFileChange(e, 'image')} accept="image/*" className="hidden" />
-
-                <Button onClick={() => documentInputRef.current?.click()} disabled={isLoading.documentUpload} className="flex-grow sm:flex-grow-0">
-                {isLoading.documentUpload ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
-                Upload Document
-                </Button>
-                <input type="file" ref={documentInputRef} onChange={(e) => handleFileChange(e, 'document')} accept=".pdf,.csv,.xls,.xlsx" className="hidden" />
-                
-                <Button onClick={toggleVoiceRecording} variant={isRecording ? "destructive" : "default"} disabled={!recognitionRef.current} className="flex-grow sm:flex-grow-0">
-                {isRecording ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
-                {isRecording ? 'Stop Voice' : 'Start Voice'}
-                </Button>
-
-                <Button onClick={toggleCamera} variant={isCameraActive ? "destructive" : "default"} className="flex-grow sm:flex-grow-0">
-                {isCameraActive ? <VideoOff className="mr-2 h-4 w-4" /> : <Video className="mr-2 h-4 w-4" />}
-                {isCameraActive ? 'Stop Camera' : 'Start Camera'}
-                </Button>
-
-                {isCameraActive && (
-                <Button onClick={takePhoto} disabled={isLoading.imageCapture || isLoading.imageAnalysis} className="flex-grow sm:flex-grow-0">
-                    {isLoading.imageCapture ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
-                    Take Photo
-                </Button>
+    <>
+      <div className="container mx-auto p-4 flex-grow">
+        <div className="w-full flex flex-col lg:flex-row lg:gap-8 items-start">
+          {/* Left Pane */}
+          <div className="flex flex-col gap-6 w-full lg:w-1/2">
+            <Card className="w-full shadow-lg">
+              <CardHeader>
+                <CardTitle>History</CardTitle>
+                <CardDescription>Your recent activities.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {history.length === 0 ? (
+                  <p className="text-muted-foreground">No activity yet.</p>
+                ) : (
+                  <ScrollArea className="h-32">
+                    <ul className="space-y-1">
+                      {history.map((item, index) => (
+                        <li key={index} className="text-sm text-muted-foreground truncate">{item}</li>
+                      ))}
+                    </ul>
+                  </ScrollArea>
                 )}
-            </div>
-            
-            <div className="flex gap-2 items-center">
-                <Input 
-                type="text" 
-                placeholder="Or, ask anything..." 
-                value={inputValue} 
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                className="flex-grow"
-                />
-                <Button onClick={handleSearch} disabled={isLoading.search || !inputValue.trim()}>
-                  {isLoading.search ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-                  Search
-                </Button>
-            </div>
-        </CardContent>
-      </Card>
+              </CardContent>
+            </Card>
 
-      {isCameraActive && (
-        <div className="w-full max-w-md mb-6 rounded-lg overflow-hidden shadow-lg border border-border">
-          <video ref={videoRef} autoPlay playsInline muted className="w-full h-auto aspect-video bg-muted" />
-          <canvas ref={canvasRef} className="hidden" />
+            <Card className="w-full shadow-lg">
+              <CardHeader>
+                  <CardTitle className="text-center">Data Capture Tools</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                  <div className="flex flex-wrap gap-2 justify-center">
+                      <Button onClick={() => imageInputRef.current?.click()} disabled={isLoading.imageUpload || isLoading.imageCapture} className="flex-grow sm:flex-grow-0">
+                      {isLoading.imageUpload ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                      Upload Image
+                      </Button>
+                      <input type="file" ref={imageInputRef} onChange={(e) => handleFileChange(e, 'image')} accept="image/*" className="hidden" />
+
+                      <Button onClick={() => documentInputRef.current?.click()} disabled={isLoading.documentUpload} className="flex-grow sm:flex-grow-0">
+                      {isLoading.documentUpload ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                      Upload Document
+                      </Button>
+                      <input type="file" ref={documentInputRef} onChange={(e) => handleFileChange(e, 'document')} accept=".pdf,.csv,.xls,.xlsx" className="hidden" />
+                      
+                      <Button onClick={toggleVoiceRecording} variant={isRecording ? "destructive" : "default"} disabled={!recognitionRef.current} className="flex-grow sm:flex-grow-0">
+                      {isRecording ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
+                      {isRecording ? 'Stop Voice' : 'Start Voice'}
+                      </Button>
+
+                      <Button onClick={toggleCamera} variant={isCameraActive ? "destructive" : "default"} className="flex-grow sm:flex-grow-0">
+                      {isCameraActive ? <VideoOff className="mr-2 h-4 w-4" /> : <Video className="mr-2 h-4 w-4" />}
+                      {isCameraActive ? 'Stop Camera' : 'Start Camera'}
+                      </Button>
+
+                      {isCameraActive && (
+                      <Button onClick={takePhoto} disabled={isLoading.imageCapture || isLoading.imageAnalysis} className="flex-grow sm:flex-grow-0">
+                          {isLoading.imageCapture ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
+                          Take Photo
+                      </Button>
+                      )}
+                  </div>
+                  
+                  <div className="flex gap-2 items-center">
+                      <Input 
+                      type="text" 
+                      placeholder="Or, ask anything..." 
+                      value={inputValue} 
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                      className="flex-grow"
+                      />
+                      <Button onClick={handleSearch} disabled={isLoading.search || !inputValue.trim()}>
+                        {isLoading.search ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                        Search
+                      </Button>
+                  </div>
+              </CardContent>
+            </Card>
+
+            {isCameraActive && (
+              <div className="w-full rounded-lg overflow-hidden shadow-lg border border-border">
+                <video ref={videoRef} autoPlay playsInline muted className="w-full h-auto aspect-video bg-muted" />
+                <canvas ref={canvasRef} className="hidden" />
+              </div>
+            )}
+          </div>
+
+          {/* Right Pane - Results */}
+          <div className="w-full lg:w-1/2">
+            {(outputData || isLoading.imageAnalysis || isLoading.documentUpload) && (
+              <Card className="w-full shadow-lg mt-6 lg:mt-0">
+                <CardHeader>
+                  <CardTitle>Result</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="max-h-[40rem] lg:max-h-[45rem]">
+                   {renderOutput()}
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
-      )}
-      
-      {(outputData || isLoading.imageAnalysis || isLoading.documentUpload) && (
-        <Card className="w-full max-w-3xl mb-6 shadow-lg">
-          <CardHeader>
-            <CardTitle>Result</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="max-h-[40rem]">
-             {renderOutput()}
-            </ScrollArea>
-          </CardContent>
-        </Card>
-      )}
-      
-      <Button onClick={refreshPage} variant="outline" className="mt-auto self-center">
-        <RefreshCw className="mr-2 h-4 w-4" /> Refresh Page
-      </Button>
-    </div>
+      </div>
+      <div className="container mx-auto p-4 flex justify-center">
+        <Button onClick={refreshPage} variant="outline" className="mb-4">
+          <RefreshCw className="mr-2 h-4 w-4" /> Refresh Page
+        </Button>
+      </div>
+    </>
   );
 }
-
