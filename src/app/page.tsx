@@ -301,6 +301,7 @@ export default function DataCapturePage() {
       videoRef.current.srcObject = null;
     }
     setCameraStreamState('inactive');
+    setHasCameraPermission(null); // Reset permission state
   };
 
   const takePhoto = async () => {
@@ -379,12 +380,6 @@ export default function DataCapturePage() {
       csvContent += row.map(escapeCSVCell).join(',') + '\n';
     });
 
-    // Optionally add fullText to CSV
-    // if (data.fullText) {
-    //   csvContent += '\n\nFull Extracted Text:\n';
-    //   csvContent += `"${escapeCSVCell(data.fullText)}"\n`;
-    // }
-
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     if (link.download !== undefined) {
@@ -403,9 +398,10 @@ export default function DataCapturePage() {
   const handleDownloadPDF = (data: ExtractStructuredDataFromImageOutput | AnalyzeUploadedDocumentOutput | null) => {
     if (!data) return;
     const tableSource = (data as ExtractStructuredDataFromImageOutput).table || (data as AnalyzeUploadedDocumentOutput).extractedTable;
-    const fullText = data.fullText;
+    const fullText = (data as ExtractStructuredDataFromImageOutput).fullText || (data as AnalyzeUploadedDocumentOutput).fullText;
 
-    if (!tableSource && !fullText) {
+
+    if ((!tableSource || tableSource.rows.length === 0) && !fullText) {
         toast({ variant: "destructive", title: "PDF Export Error", description: "No data available to export." });
         return;
     }
@@ -422,34 +418,33 @@ export default function DataCapturePage() {
     yPos += lineHeight * 2;
     pdf.setFontSize(10);
 
-    if (tableSource && tableSource.headers && tableSource.rows) {
+    if (tableSource && tableSource.headers && tableSource.rows && tableSource.rows.length > 0) {
       const { headers, rows } = tableSource;
       pdf.setFontSize(12);
       pdf.text("Structured Table Data:", margin, yPos);
       yPos += lineHeight * 1.5;
       pdf.setFontSize(8);
 
-      // Basic table rendering
       const colWidth = usableWidth / Math.max(1, headers.length);
       headers.forEach((header, index) => {
         const headerLines = pdf.splitTextToSize(String(header), colWidth - 2);
         pdf.text(headerLines, margin + index * colWidth, yPos);
       });
-      yPos += lineHeight * (pdf.splitTextToSize(headers.join(' '), usableWidth).length); // Estimate header height
+      yPos += lineHeight * (pdf.splitTextToSize(headers.join(' '), usableWidth).length || 1); 
 
       rows.forEach(row => {
-        if (yPos > pageHeight - margin - lineHeight * 2) { // Check for page break before row
+        if (yPos > pageHeight - margin - lineHeight * 2) { 
           pdf.addPage();
           yPos = margin;
           pdf.setFontSize(12);
           pdf.text("Structured Table Data (Continued)", margin, yPos);
           yPos += lineHeight * 1.5;
           pdf.setFontSize(8);
-          headers.forEach((header, index) => { // Re-add headers
+          headers.forEach((header, index) => { 
             const headerLines = pdf.splitTextToSize(String(header), colWidth - 2);
             pdf.text(headerLines, margin + index * colWidth, yPos);
           });
-          yPos += lineHeight * (pdf.splitTextToSize(headers.join(' '), usableWidth).length);
+          yPos += lineHeight * (pdf.splitTextToSize(headers.join(' '), usableWidth).length || 1);
         }
         let maxRowHeight = lineHeight;
         row.forEach((cell, index) => {
@@ -461,7 +456,7 @@ export default function DataCapturePage() {
         });
         yPos += maxRowHeight;
       });
-      yPos += lineHeight; // Extra space after table
+      yPos += lineHeight; 
     }
 
     if (fullText) {
@@ -512,14 +507,13 @@ export default function DataCapturePage() {
     if (outputData?.type === 'imageAnalysis' && outputData.previewUrl) {
       const tableData = analysisData?.table;
       const hasTableData = !!(tableData && tableData.headers && tableData.headers.length > 0 && tableData.rows && tableData.rows.length > 0);
-      const hasFullText = !!(analysisData?.fullText && analysisData.fullText.trim() !== '');
-
+      
       return (
         <>
           <div className="flex flex-col md:flex-row md:gap-6 mb-4">
             <div className="md:w-1/3 mb-4 md:mb-0 flex flex-col items-center md:items-start">
               <p className="font-semibold mb-2 text-lg text-center md:text-left">
-                {isLoadingAnalysis || !analysisData ? "Analyzing for structured data. Analyzing for full data." : "Analyzed Image"}
+                {isLoadingAnalysis || !analysisData ? "Analyzing data..." : "Analyzed Image"}
               </p>
               <Image src={outputData.previewUrl} alt="Analyzed preview" width={150} height={100} className="rounded-md border object-contain" data-ai-hint="document user content"/>
             </div>
@@ -539,22 +533,8 @@ export default function DataCapturePage() {
             </div>
           </div>
 
-          {(isLoadingAnalysis || !analysisData) ? (
-            <div className="mt-6 space-y-2">
-              <Skeleton className="h-8 w-1/4" />
-              <Skeleton className="h-16 w-full" />
-            </div>
-          ) : hasFullText ? (
-            <>
-              <h3 className="font-semibold mt-6 mb-2 text-lg">Full Extracted Text</h3>
-              <ScrollArea className="h-auto max-h-60">
-                <pre className="whitespace-pre-wrap bg-muted p-4 rounded-md text-sm">{analysisData.fullText}</pre>
-              </ScrollArea>
-            </>
-          ) : null}
-
-          {!(isLoadingAnalysis || !analysisData) && !hasTableData && !hasFullText && (
-             <p className="text-muted-foreground mt-4">No structured table or full text extracted from the image.</p>
+          {!(isLoadingAnalysis || !analysisData) && !hasTableData && (
+             <p className="text-muted-foreground mt-4">No structured table extracted from the image.</p>
           )}
 
           {showDownloadButtons && (
@@ -574,7 +554,6 @@ export default function DataCapturePage() {
     if (outputData?.type === 'documentAnalysis') {
         const docTable = docData?.extractedTable;
         const hasDocTableData = !!(docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows && docTable.rows.length > 0);
-        const hasDocFullText = !!(docData?.fullText && docData.fullText.trim() !== '');
 
         return (
            <div>
@@ -589,23 +568,9 @@ export default function DataCapturePage() {
             ) : (
                <p className="text-muted-foreground">No table data extracted from the document.</p>
             )}
-
-            {(isLoadingDoc || !docData) ? (
-              <div className="mt-6 space-y-2">
-                <Skeleton className="h-8 w-1/4" />
-                <Skeleton className="h-16 w-full" />
-              </div>
-            ) : hasDocFullText ? (
-              <>
-                <h3 className="font-semibold mt-6 mb-2 text-lg">Full Extracted Text from Document</h3>
-                <ScrollArea className="h-auto max-h-60">
-                  <pre className="whitespace-pre-wrap bg-muted p-4 rounded-md text-sm">{docData.fullText}</pre>
-                </ScrollArea>
-              </>
-            ) : null}
-
-            {!(isLoadingDoc || !docData) && !hasDocTableData && !hasDocFullText && (
-               <p className="text-muted-foreground mt-4">No table data or full text extracted from the document.</p>
+            
+            {!(isLoadingDoc || !docData) && !hasDocTableData && (
+               <p className="text-muted-foreground mt-4">No table data extracted from the document.</p>
             )}
 
             {showDownloadButtons && (
@@ -626,7 +591,7 @@ export default function DataCapturePage() {
         if (isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoadingDoc || isLoadingAnalysis || isLoading.search || isLoading.cameraStart) {
             const message = isLoading.imageCaptureFirebase ? "Uploading image to cloud..." : 
                             isLoading.cameraStart ? "Starting camera..." : 
-                            (isLoadingAnalysis || isLoadingDoc) ? "Analyzing for structured data. Analyzing for full data." :
+                            (isLoadingAnalysis || isLoadingDoc) ? "Analyzing data..." :
                             "Processing...";
             return (
                 <div className="space-y-2">
@@ -636,12 +601,6 @@ export default function DataCapturePage() {
                     </div>
                     <Skeleton className="h-8 w-1/3" />
                     <Skeleton className="h-20 w-full" />
-                    {(isLoadingDoc || isLoadingAnalysis) && ( 
-                      <>
-                        <Skeleton className="h-8 w-1/4 mt-4" />
-                        <Skeleton className="h-16 w-full" />
-                      </>
-                    )}
                 </div>
             );
         }
@@ -656,7 +615,7 @@ export default function DataCapturePage() {
           <div className="mb-4 flex flex-col items-center md:items-start">
             <p className="font-semibold mb-2 text-lg text-center md:text-left">
               {outputData.type === 'imagePreview' && !isLoadingAnalysis && !isLoadingFirebaseUpload ? "Preview" :
-               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing for structured data. Analyzing for full data." : 
+               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing data..." : 
                (outputData.type === 'imagePreview' && isLoadingFirebaseUpload) ? "Uploading to Cloud..." :
                outputData.type === 'error' ? "Image with Error" :
                "Image"
@@ -687,17 +646,14 @@ export default function DataCapturePage() {
               if (isLoadingAnalysis || !outputData.content) {
                  return ( 
                     <div>
-                        <p className="font-semibold mb-2 text-lg">Analyzing for structured data. Analyzing for full data.</p>
+                        <p className="font-semibold mb-2 text-lg">Analyzing data...</p>
                         <div className="space-y-2">
                             <Skeleton className="h-8 w-1/3" />
                             <Skeleton className="h-20 w-full" />
-                            <Skeleton className="h-8 w-1/4 mt-4" />
-                            <Skeleton className="h-16 w-full" />
                         </div>
                     </div>
                 );
               }
-              // The detailed display is handled above, this is a fallback if that section somehow isn't rendered.
               return <p className="text-muted-foreground">Image analysis results are displayed above.</p>;
             case 'imagePreview':
               if (isLoading.imageUpload || isLoadingFirebaseUpload) {
@@ -706,12 +662,10 @@ export default function DataCapturePage() {
               if (isLoadingAnalysis) { 
                 return ( 
                     <div>
-                        <p className="font-semibold mb-2 text-lg">Analyzing for structured data. Analyzing for full data.</p>
+                        <p className="font-semibold mb-2 text-lg">Analyzing data...</p>
                         <div className="space-y-2">
                             <Skeleton className="h-8 w-1/3" />
                             <Skeleton className="h-20 w-full" />
-                            <Skeleton className="h-8 w-1/4 mt-4" />
-                            <Skeleton className="h-16 w-full" />
                         </div>
                     </div>
                 );
