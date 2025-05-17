@@ -24,6 +24,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { handleTextQuery, handleImageUpload, handleDocumentUpload, ActionResult } from './actions';
 import type { ExtractStructuredDataFromImageOutput } from "@/ai/flows/extract-structured-data-from-image";
 import type { AnalyzeUploadedDocumentOutput } from "@/ai/flows/analyze-uploaded-document";
@@ -43,6 +44,7 @@ export default function DataCapturePage() {
   const [inputValue, setInputValue] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [outputData, setOutputData] = useState<OutputData | null>(null);
   const [isLoading, setIsLoading] = useState<Record<string, boolean>>({});
 
@@ -63,7 +65,7 @@ export default function DataCapturePage() {
 
     const loaderKey = fileType === 'image' ? 'imageUpload' : 'documentUpload';
     setIsLoading(prev => ({ ...prev, [loaderKey]: true }));
-    setOutputData(null); // Clear previous output
+    setOutputData(null); 
 
     const reader = new FileReader();
     reader.onloadend = async () => {
@@ -72,11 +74,10 @@ export default function DataCapturePage() {
 
       if (fileType === 'image') {
         addToHistory(`Uploaded image: ${file.name}`);
-        // For images, show preview first, then analyze on demand
         setOutputData({ type: 'imagePreview', content: null, previewUrl: dataUri });
         setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
-        return; // Stop here for images, analysis is separate
-      } else { // For documents, analyze immediately
+        return; 
+      } else { 
         addToHistory(`Uploaded document: ${file.name}`);
         setOutputData({ type: 'documentAnalysis', content: { extractedTable: { headers: [], rows: [] }, fullText: "" }, previewUrl: undefined });
         result = await handleDocumentUpload(dataUri);
@@ -92,7 +93,7 @@ export default function DataCapturePage() {
       setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
     };
     reader.readAsDataURL(file);
-    event.target.value = ""; // Reset file input
+    event.target.value = ""; 
   };
 
   const handleImageAnalysis = async () => {
@@ -100,7 +101,6 @@ export default function DataCapturePage() {
     setIsLoading(prev => ({ ...prev, imageAnalysis: true }));
 
     addToHistory('Extracting data from image.');
-    // Initialize outputData for imageAnalysis to show skeletons immediately
     setOutputData(prev => ({ ...prev!, type: 'imageAnalysis', content: { table: { headers: [], rows: [] }, fullText: "" } }));
     const result = await handleImageUpload(outputData.previewUrl);
 
@@ -133,18 +133,16 @@ export default function DataCapturePage() {
   };
 
   useEffect(() => {
-    // Speech Recognition Setup
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       console.warn('Speech Recognition API is not supported in this browser.');
-      // toast({ variant: "destructive", title: "Unsupported Feature", description: "Speech recognition is not supported in this browser." });
       return;
     }
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognitionRef.current = new SpeechRecognition();
     const recognition = recognitionRef.current;
-    recognition.continuous = false; // Stop after first final result
-    recognition.interimResults = true; // Show interim results
+    recognition.continuous = false; 
+    recognition.interimResults = true; 
 
     recognition.onstart = () => {
       setIsRecording(true);
@@ -161,16 +159,15 @@ export default function DataCapturePage() {
           interimTranscript += event.results[i][0].transcript;
         }
       }
-      setOutputData({ type: 'text', content: interimTranscript || finalTranscript || 'Listening...' }); // Update with interim or final
+      setOutputData({ type: 'text', content: interimTranscript || finalTranscript || 'Listening...' }); 
       if (finalTranscript) {
-        setInputValue(finalTranscript); // Set to input field when final
-        recognition.stop(); // Stop recognition after final result
+        setInputValue(finalTranscript); 
+        recognition.stop(); 
       }
     };
 
     recognition.onend = () => {
       setIsRecording(false);
-       // Clear "Listening..." if no final result was processed into inputValue
        if (outputData?.content === 'Listening...') {
          setOutputData(null);
        }
@@ -184,14 +181,13 @@ export default function DataCapturePage() {
     };
      return () => {
       if (recognitionRef.current) {
-        recognitionRef.current.abort(); // Ensure recognition is stopped on unmount
+        recognitionRef.current.abort(); 
       }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); // Added outputData?.content to dependencies was causing re-renders
+  }, [toast, outputData?.content]);
 
 
   const toggleVoiceRecording = () => {
@@ -200,9 +196,9 @@ export default function DataCapturePage() {
       recognitionRef.current.stop();
     } else {
       try {
+        setOutputData(null); // Clear previous output before starting
         recognitionRef.current.start();
       } catch (e) {
-        // Handle error if recognition is already started or other issues
         console.error("Error starting speech recognition:", e);
         toast({ variant: "destructive", title: "Speech Error", description: "Could not start voice recording." });
       }
@@ -213,24 +209,61 @@ export default function DataCapturePage() {
     if (isCameraActive) {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
       setIsCameraActive(false);
       if (videoRef.current) videoRef.current.srcObject = null;
+      // setHasCameraPermission(null); // Optionally reset permission status
     } else {
+      if (typeof navigator.mediaDevices?.getUserMedia === 'undefined') {
+        toast({
+          variant: "destructive",
+          title: "Camera Not Supported",
+          description: "Your browser does not support camera access.",
+        });
+        setHasCameraPermission(false);
+        setIsCameraActive(false);
+        return;
+      }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         streamRef.current = stream;
-        if (videoRef.current) videoRef.current.srcObject = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        setHasCameraPermission(true);
         setIsCameraActive(true);
       } catch (err) {
         console.error('Error accessing camera:', err);
-        toast({ variant: "destructive", title: "Camera Error", description: "Could not access camera." });
+        let description = "Could not access camera.";
+        if (err instanceof Error) {
+            if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+                description = "Camera permission was denied. Please enable it in your browser settings.";
+            } else if (err.name === "NotFoundError") {
+                description = "No camera was found on your device.";
+            } else {
+                description = `An error occurred: ${err.message}. Please ensure permissions are granted.`;
+            }
+        }
+        toast({ variant: "destructive", title: "Camera Error", description });
+        setHasCameraPermission(false);
+        setIsCameraActive(false);
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        }
+        if (videoRef.current) videoRef.current.srcObject = null;
       }
     }
   };
 
   const takePhoto = async () => {
-    if (!isCameraActive || !videoRef.current || !canvasRef.current) return;
+    if (!isCameraActive || !videoRef.current || !canvasRef.current || !hasCameraPermission) {
+      if (!hasCameraPermission && isCameraActive) {
+        toast({ variant: "destructive", title: "Camera Permission", description: "Cannot take photo without camera permission."});
+      }
+      return;
+    }
     const video = videoRef.current;
     const canvas = canvasRef.current;
     canvas.width = video.videoWidth;
@@ -243,7 +276,7 @@ export default function DataCapturePage() {
       setIsLoading(prev => ({ ...prev, imageCapture: true }));
       setOutputData({ type: 'imagePreview', content: null, previewUrl: dataUri });
       addToHistory('Captured photo from camera.');
-      setIsLoading(prev => ({ ...prev, imageCapture: false })); // This should be false after setting output
+      setIsLoading(prev => ({ ...prev, imageCapture: false })); 
     }
   };
 
@@ -255,7 +288,6 @@ export default function DataCapturePage() {
     const isLoadingAnalysis = isLoading.imageAnalysis;
     const isLoadingDoc = isLoading.documentUpload;
 
-    // Image Analysis Output
     if (outputData?.type === 'imageAnalysis' && outputData.previewUrl) {
       const analysisData = outputData.content as ExtractStructuredDataFromImageOutput | null;
       const tableData = analysisData?.table;
@@ -308,7 +340,6 @@ export default function DataCapturePage() {
       );
     }
 
-    // Document Analysis Output
     if (outputData?.type === 'documentAnalysis') {
         const docData = outputData.content as AnalyzeUploadedDocumentOutput | null;
         const docTable = docData?.extractedTable;
@@ -350,15 +381,13 @@ export default function DataCapturePage() {
         );
     }
 
-
-    // Loading states or general output
-    if (!outputData) { // Show skeletons if any main action is loading and there's no outputData yet
+    if (!outputData) { 
         if (isLoading.imageUpload || isLoading.imageCapture || isLoadingDoc || isLoadingAnalysis || isLoading.search) {
             return (
                 <div className="space-y-2">
                     <Skeleton className="h-8 w-1/3" />
                     <Skeleton className="h-20 w-full" />
-                    {(isLoadingDoc || isLoadingAnalysis) && ( // Show more skeletons if it's an analysis type
+                    {(isLoadingDoc || isLoadingAnalysis) && ( 
                       <>
                         <Skeleton className="h-8 w-1/4 mt-4" />
                         <Skeleton className="h-16 w-full" />
@@ -367,19 +396,18 @@ export default function DataCapturePage() {
                 </div>
             );
         }
-        return null; // No loading, no output
+        return null; 
     }
 
-    // Image Preview (before analysis) or Error with Preview
     const showImageActions = outputData.previewUrl && (outputData.type === 'imagePreview' || (outputData.type === 'error' && outputData.previewUrl));
 
     return (
       <>
-        {outputData.previewUrl && outputData.type !== 'imageAnalysis' && ( // Don't show preview again if analysis is already displayed
+        {outputData.previewUrl && outputData.type !== 'imageAnalysis' && ( 
           <div className="mb-4 flex flex-col items-center md:items-start">
             <p className="font-semibold mb-2 text-lg text-center md:text-left">
               {outputData.type === 'imagePreview' && !isLoadingAnalysis ? "Preview" :
-               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing..." : // Show "Analyzing..." if preview is active during analysis
+               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing..." : 
                outputData.type === 'error' ? "Image with Error" :
                "Image"
               }
@@ -397,15 +425,13 @@ export default function DataCapturePage() {
           </div>
         )}
 
-        {/* General text, specific messages for image preview, or error messages */}
         {(() => {
           switch (outputData.type) {
             case 'text':
               return <p className="text-foreground whitespace-pre-wrap">{outputData.content}</p>;
-            case 'imageAnalysis': // This case is now handled above with its specific layout
-              // This part will only show if somehow it falls through, e.g. no previewUrl but type is imageAnalysis
+            case 'imageAnalysis': 
               if (isLoadingAnalysis || !outputData.content) {
-                 return ( // Fallback skeleton if imageAnalysis is active but content not ready and not handled by the main block
+                 return ( 
                     <div>
                         <p className="font-semibold mb-2 text-lg">Analyzing for structured data. Analyzing for full data.</p>
                         <div className="space-y-2">
@@ -417,15 +443,13 @@ export default function DataCapturePage() {
                     </div>
                 );
               }
-              // If data is ready, it's displayed in the specific block above.
-              // This message acts as a placeholder if the specific block isn't rendered for some reason.
               return <p className="text-muted-foreground">Image analysis results are being processed or displayed above.</p>;
             case 'imagePreview':
               if (isLoading.imageUpload || isLoading.imageCapture) {
                 return <p>Processing image...</p>;
               }
-              if (isLoadingAnalysis) { // If analysis started from preview
-                return ( // Show skeletons while analyzing
+              if (isLoadingAnalysis) { 
+                return ( 
                     <div>
                         <p className="font-semibold mb-2 text-lg">Analyzing for structured data. Analyzing for full data.</p>
                         <div className="space-y-2">
@@ -446,9 +470,8 @@ export default function DataCapturePage() {
                 </div>
               );
             default:
-               // This default case handles if isLoading.search is true but outputData isn't set yet
                if (isLoading.search || Object.values(isLoading).some(val => val === true && !outputData)) {
-                 return ( // Generic loading skeleton for search or other unhandled loading states
+                 return ( 
                     <div className="space-y-2">
                         <Skeleton className="h-8 w-1/3" />
                         <Skeleton className="h-20 w-full" />
@@ -467,7 +490,6 @@ export default function DataCapturePage() {
     <>
       <div className="container mx-auto p-4 flex-grow">
         <div className="w-full flex flex-col lg:flex-row lg:gap-8 items-start">
-          {/* Left Pane */}
           <div className="flex flex-col gap-6 w-full lg:w-1/2">
             <Card className="w-full shadow-lg">
               <CardHeader>
@@ -518,7 +540,7 @@ export default function DataCapturePage() {
                       </Button>
 
                       {isCameraActive && (
-                      <Button onClick={takePhoto} disabled={isLoading.imageCapture || isLoading.imageAnalysis} className="flex-grow sm:flex-grow-0">
+                      <Button onClick={takePhoto} disabled={isLoading.imageCapture || isLoading.imageAnalysis || !hasCameraPermission} className="flex-grow sm:flex-grow-0">
                           {isLoading.imageCapture ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
                           Take Photo
                       </Button>
@@ -543,14 +565,27 @@ export default function DataCapturePage() {
             </Card>
 
             {isCameraActive && (
-              <div className="w-full rounded-lg overflow-hidden shadow-lg border border-border">
-                <video ref={videoRef} autoPlay playsInline muted className="w-full h-auto aspect-video bg-muted" />
-                <canvas ref={canvasRef} className="hidden" />
-              </div>
+              <Card className="w-full shadow-lg">
+                <CardHeader>
+                  <CardTitle>Live Camera Feed</CardTitle>
+                </CardHeader>
+                <CardContent className="p-4 space-y-4">
+                  <video ref={videoRef} autoPlay playsInline muted className="w-full h-auto aspect-video bg-muted rounded-md border" />
+                  <canvas ref={canvasRef} className="hidden" />
+                  {isCameraActive && hasCameraPermission === false && (
+                    <Alert variant="destructive" className="rounded-md">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>Camera Access Required</AlertTitle>
+                      <AlertDescription>
+                        Camera permission was denied or an error occurred. Please check your browser settings to allow camera access for this site.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </CardContent>
+              </Card>
             )}
           </div>
 
-          {/* Right Pane - Results */}
           <div className="w-full lg:w-1/2">
             {(outputData || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.imageUpload || isLoading.imageCapture || isLoading.search ) && (
               <Card className="w-full shadow-lg mt-6 lg:mt-0">
@@ -575,4 +610,3 @@ export default function DataCapturePage() {
     </>
   );
 }
-
