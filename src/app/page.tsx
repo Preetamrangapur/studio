@@ -268,9 +268,7 @@ export default function DataCapturePage() {
                       <Skeleton className="h-20 w-full" />
                   </div>
               ) : hasTableData ? (
-                <ScrollArea className="h-auto max-h-80">
-                  <DataTable headers={tableData.headers} rows={tableData.rows} />
-                </ScrollArea>
+                <DataTable headers={tableData.headers} rows={tableData.rows} />
               ) : (
                 <p className="text-muted-foreground">No structured table data extracted from the image.</p>
               )}
