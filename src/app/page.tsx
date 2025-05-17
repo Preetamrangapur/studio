@@ -257,8 +257,6 @@ export default function DataCapturePage() {
           setHasCameraPermission(true);
           setCameraStreamState('active');
         } else {
-          // Fallback for browsers that don't return a promise from play()
-          // or if playPromise resolves immediately without error.
           setHasCameraPermission(true);
           setCameraStreamState('active');
         }
@@ -726,7 +724,7 @@ export default function DataCapturePage() {
     <>
       <div className="container mx-auto p-4 flex-grow">
         <div className="w-full flex flex-col lg:flex-row lg:gap-8 items-start">
-          <div className="flex flex-col gap-6 w-full lg:w-1/2">
+          <div className="flex flex-col gap-6 w-full lg:w-2/5">
             <Card className="w-full shadow-lg">
               <CardHeader>
                 <CardTitle>History</CardTitle>
@@ -854,7 +852,7 @@ export default function DataCapturePage() {
             </Card>
           </div>
 
-          <div className="w-full lg:w-1/2">
+          <div className="w-full lg:w-3/5">
             {(outputData || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoading.search || isLoading.cameraStart) && (
               <Card className="w-full shadow-lg mt-6 lg:mt-0">
                 <CardHeader>
@@ -878,3 +876,4 @@ export default function DataCapturePage() {
     </>
   );
 }
+
