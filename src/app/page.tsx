@@ -37,6 +37,7 @@ import DataTable from '@/components/DataTable';
 import { storage } from '@/lib/firebase'; 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import jsPDF from 'jspdf';
+import { cn } from "@/lib/utils";
 
 
 type OutputType = 'text' | 'imageAnalysis' | 'documentAnalysis' | 'imagePreview' | 'error';
@@ -251,15 +252,11 @@ export default function DataCapturePage() {
         videoRef.current.srcObject = stream;
         const playPromise = videoRef.current.play();
         if (playPromise !== undefined) {
-          await playPromise; // Wait for play to succeed or fail
+          await playPromise; 
           console.log("Camera stream playback started.");
           setHasCameraPermission(true);
           setCameraStreamState('active');
         } else {
-          // Fallback for browsers where play() doesn't return a promise (older ones)
-          // We assume autoplay attribute might work, or it might not.
-          // For robustness, we can check if video is playing after a short delay if needed,
-          // but for now, we proceed optimistically.
           setHasCameraPermission(true);
           setCameraStreamState('active');
         }
@@ -311,7 +308,7 @@ export default function DataCapturePage() {
       videoRef.current.play().catch(e => {
         console.error("Error resuming video:", e);
         toast({variant: "destructive", title: "Camera Error", description: "Could not resume camera."});
-        setCameraStreamState('inactive'); // Consider it an error if resume fails
+        setCameraStreamState('inactive'); 
         setHasCameraPermission(false);
       });
       setCameraStreamState('active');
@@ -356,7 +353,6 @@ export default function DataCapturePage() {
       
       setIsLoading(prev => ({ ...prev, imageCaptureFirebase: true }));
       const localDataUri = canvas.toDataURL('image/png');
-      // Immediately show local preview while uploading
       setOutputData({ type: 'imagePreview', content: null, previewUrl: localDataUri, isFirebaseUrl: false });
       addToHistory('Captured photo. Uploading to cloud...');
 
@@ -364,7 +360,6 @@ export default function DataCapturePage() {
         if (!blob) {
           toast({ variant: "destructive", title: "Capture Error", description: "Failed to create image blob." });
           setIsLoading(prev => ({ ...prev, imageCaptureFirebase: false }));
-          // Keep local preview if blob fails
           return;
         }
         try {
@@ -374,14 +369,12 @@ export default function DataCapturePage() {
           await uploadBytes(imageStorageRef, blob);
           const downloadURL = await getDownloadURL(imageStorageRef);
 
-          // Update preview to Firebase URL
           setOutputData({ type: 'imagePreview', content: null, previewUrl: downloadURL, isFirebaseUrl: true });
           addToHistory('Photo uploaded to cloud.');
           toast({ title: "Photo Uploaded", description: "Image successfully stored in the cloud." });
         } catch (error) {
           console.error("Error uploading to Firebase Storage:", error);
           toast({ variant: "destructive", title: "Upload Failed", description: "Could not store image in the cloud." });
-          // Revert to local preview if upload fails but local one was shown
           setOutputData({ type: 'imagePreview', content: null, previewUrl: localDataUri, isFirebaseUrl: false });
         } finally {
           setIsLoading(prev => ({ ...prev, imageCaptureFirebase: false }));
@@ -523,14 +516,13 @@ export default function DataCapturePage() {
     if (outputData?.type === 'imageAnalysis' && outputData.previewUrl) {
       const tableData = analysisData?.table;
       const hasTableData = !!(tableData && tableData.headers && tableData.headers.length > 0 && tableData.rows && tableData.rows.length > 0);
-      const fullTextData = analysisData?.fullText;
       
       return (
         <>
           <div className="flex flex-col md:flex-row md:gap-6 mb-4">
             <div className="md:w-1/3 mb-4 md:mb-0 flex flex-col items-center md:items-start">
               <p className="font-semibold mb-2 text-lg text-center md:text-left">
-                {isLoadingAnalysis || !analysisData ? "Analyzing data..." : "Analyzed Image"}
+                {isLoadingAnalysis || !analysisData ? "Extracting structured data..." : "Analyzed Image"}
               </p>
               <Image src={outputData.previewUrl} alt="Analyzed preview" width={150} height={100} className="rounded-md border object-contain" data-ai-hint="document user content"/>
             </div>
@@ -571,7 +563,6 @@ export default function DataCapturePage() {
     if (outputData?.type === 'documentAnalysis') {
         const docTable = docData?.extractedTable;
         const hasDocTableData = !!(docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows && docTable.rows.length > 0);
-        const fullDocText = docData?.fullText;
 
         return (
            <div>
@@ -822,26 +813,41 @@ export default function DataCapturePage() {
               </CardContent>
             </Card>
 
-            {cameraStreamState !== 'inactive' && (
-              <Card className="w-full shadow-lg">
-                <CardHeader>
-                  <CardTitle>Live Camera Feed {cameraStreamState === 'paused' && '(Paused)'}</CardTitle>
-                </CardHeader>
-                <CardContent className="p-4 space-y-4">
-                  <video ref={videoRef} playsInline autoPlay muted className="w-full h-auto aspect-video bg-muted rounded-md border" />
-                  <canvas ref={canvasRef} className="hidden" />
-                  {cameraStreamState !== 'inactive' && hasCameraPermission === false && (
-                    <Alert variant="destructive" className="rounded-md">
-                      <AlertTriangle className="h-4 w-4" />
-                      <AlertTitle>Camera Access Required</AlertTitle>
-                      <AlertDescription>
-                        Camera permission was denied or an error occurred. Please check your browser settings to allow camera access for this site.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+            {/* Camera Feed Section - Card is always rendered to ensure videoRef is available */}
+            <Card className="w-full shadow-lg">
+              <CardHeader>
+                <CardTitle>
+                  Live Camera Feed 
+                  {cameraStreamState === 'paused' && ' (Paused)'}
+                  {cameraStreamState === 'active' && !hasCameraPermission && ' (Permission Issue)'}
+                  {cameraStreamState === 'inactive' && ' (Inactive)'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4 space-y-4">
+                {/* Video element is always in the DOM; visibility controlled by className */}
+                <video ref={videoRef} playsInline autoPlay muted className={cn(
+                    "w-full h-auto aspect-video bg-muted rounded-md border",
+                    cameraStreamState === 'inactive' && 'hidden' // Hide if inactive but keep in DOM
+                )} />
+                <canvas ref={canvasRef} className="hidden" /> {/* Canvas for taking photo, always in DOM, hidden by default */}
+                
+                {cameraStreamState === 'inactive' && (hasCameraPermission === null || hasCameraPermission === true) && (
+                  <div className="flex items-center justify-center h-40 bg-muted/50 rounded-md border border-dashed">
+                    <Video className="h-10 w-10 text-muted-foreground" />
+                    <p className="ml-2 text-muted-foreground">Camera is off. Click "Start Camera" to activate.</p>
+                  </div>
+                )}
+                {cameraStreamState !== 'inactive' && hasCameraPermission === false && (
+                  <Alert variant="destructive" className="rounded-md">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Camera Access Required</AlertTitle>
+                    <AlertDescription>
+                      Camera permission was denied or an error occurred. Please check your browser settings.
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
           <div className="w-full lg:w-1/2">
@@ -868,3 +874,4 @@ export default function DataCapturePage() {
     </>
   );
 }
+
