@@ -1,7 +1,8 @@
+
 'use server';
 
 /**
- * @fileOverview Extracts structured data from an image using OCR and AI.
+ * @fileOverview Extracts structured data and full text from an image using AI.
  *
  * - extractStructuredDataFromImage - A function that handles the data extraction process.
  * - ExtractStructuredDataFromImageInput - The input type for the extractStructuredDataFromImage function.
@@ -26,7 +27,8 @@ const TableRowSchema = z.object({
 });
 
 const ExtractStructuredDataFromImageOutputSchema = z.object({
-  table: z.array(TableRowSchema).describe('A table representing the structured data extracted from the image.'),
+  table: z.array(TableRowSchema).describe('Structured data extracted as a table with headings and values. This can be an empty array if no structured data is found.'),
+  fullText: z.string().describe('A comprehensive extraction of all recognizable text from the image. This can be an empty string if no text is found.')
 });
 export type ExtractStructuredDataFromImageOutput = z.infer<typeof ExtractStructuredDataFromImageOutputSchema>;
 
@@ -38,11 +40,14 @@ const prompt = ai.definePrompt({
   name: 'extractStructuredDataFromImagePrompt',
   input: {schema: ExtractStructuredDataFromImageInputSchema},
   output: {schema: ExtractStructuredDataFromImageOutputSchema},
-  prompt: `You are an expert data extraction specialist. Your task is to analyze the image and extract structured information from it.
+  prompt: `You are an expert data extraction specialist. Your task is to analyze the provided image and extract information in two ways:
 
-  Identify key headings and their corresponding values within the image. Present the extracted data in a table format where each row consists of a heading and its associated value.
+1.  **Structured Data**: Identify distinct items that can be represented as key-value pairs or table rows. Present this as a table with 'heading' and 'value' columns. If no clear structured data is found, this table should be an empty array.
+2.  **Full Text**: Extract all recognizable text from the image as a single block of text. This should be a comprehensive transcription of the image's textual content. If no text is found, this should be an empty string.
 
-  Image: {{media url=photoDataUri}}
+Image: {{media url=photoDataUri}}
+
+Return both the structured table and the full text according to the output schema.
   `,
 });
 
@@ -57,3 +62,4 @@ const extractStructuredDataFromImageFlow = ai.defineFlow(
     return output!;
   }
 );
+

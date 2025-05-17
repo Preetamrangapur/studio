@@ -5,14 +5,13 @@
 
 import { aiAssistant } from "@/ai/flows/ai-assistant";
 import { analyzeUploadedDocument } from "@/ai/flows/analyze-uploaded-document";
-import { extractStructuredDataFromImage } from "@/ai/flows/extract-structured-data-from-image";
-// No longer importing transcribeHandwriting
+import { extractStructuredDataFromImage, ExtractStructuredDataFromImageOutput } from "@/ai/flows/extract-structured-data-from-image";
 
 export interface ActionResult {
   success: boolean;
-  data?: any;
+  data?: any; // For text and document analysis, this can be string. For image, it's ExtractStructuredDataFromImageOutput
   error?: string;
-  type?: 'text' | 'imageAnalysis' | 'documentAnalysis'; // Removed 'handwritingTranscription'
+  type?: 'text' | 'imageAnalysis' | 'documentAnalysis';
 }
 
 export async function handleTextQuery(query: string): Promise<ActionResult> {
@@ -30,8 +29,9 @@ export async function handleImageUpload(imageDataUri: string): Promise<ActionRes
     return { success: false, error: "Invalid image data URI." };
   }
   try {
-    const result = await extractStructuredDataFromImage({ photoDataUri: imageDataUri });
-    return { success: true, data: result.table, type: 'imageAnalysis' };
+    // result will be of type ExtractStructuredDataFromImageOutput
+    const result: ExtractStructuredDataFromImageOutput = await extractStructuredDataFromImage({ photoDataUri: imageDataUri });
+    return { success: true, data: result, type: 'imageAnalysis' }; // Return the entire result object
   } catch (error) {
     console.error("Error in handleImageUpload:", error);
     return { success: false, error: error instanceof Error ? error.message : "Failed to analyze image." };
@@ -51,8 +51,6 @@ export async function handleDocumentUpload(documentDataUri: string): Promise<Act
     return { success: false, error: error instanceof Error ? error.message : "Failed to analyze document." };
   }
 }
-
-// Removed handleHandwritingTranscription function
 
 // Placeholder for voice processing if a specific AI flow is needed.
 // For now, voice input will be transcribed to text and can use handleTextQuery.

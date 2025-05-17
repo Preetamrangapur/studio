@@ -24,12 +24,13 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { handleTextQuery, handleImageUpload, handleDocumentUpload, ActionResult } from './actions';
+import type { ExtractStructuredDataFromImageOutput } from "@/ai/flows/extract-structured-data-from-image";
 import DataTable from '@/components/DataTable';
 
 type OutputType = 'text' | 'imageAnalysis' | 'documentAnalysis' | 'imagePreview' | 'error';
 interface OutputData {
   type: OutputType;
-  content: any;
+  content: any; // Can be string, ExtractStructuredDataFromImageOutput, etc.
   previewUrl?: string; // For image previews
 }
 
@@ -97,8 +98,8 @@ export default function DataCapturePage() {
     addToHistory('Extracting data from image.');
     const result = await handleImageUpload(outputData.previewUrl);
     if (result.success) {
-      setOutputData({ type: 'imageAnalysis', content: result.data, previewUrl: outputData.previewUrl });
-      toast({ title: "Image Analyzed", description: "Structured data extracted." });
+      setOutputData({ type: 'imageAnalysis', content: result.data as ExtractStructuredDataFromImageOutput, previewUrl: outputData.previewUrl });
+      toast({ title: "Image Analyzed", description: "Data extraction complete." });
     } else {
       setOutputData({ type: 'error', content: result.error, previewUrl: outputData.previewUrl });
       toast({ variant: "destructive", title: "Image Analysis Error", description: result.error });
@@ -244,7 +245,7 @@ export default function DataCapturePage() {
             <p className="font-semibold mb-2">
               {outputData.type === 'imagePreview' && !isLoading.imageAnalysis ? "Preview:" : 
                outputData.type === 'imageAnalysis' ? "Analyzed Image:" :
-               isLoading.imageAnalysis ? "Analyzing for structured data..." :
+               isLoading.imageAnalysis ? "Analyzing for structured data. Analyzing for full data." :
                "Image:"
               }
             </p>
@@ -266,7 +267,28 @@ export default function DataCapturePage() {
             case 'text':
               return <p className="text-foreground whitespace-pre-wrap">{outputData.content}</p>;
             case 'imageAnalysis':
-              return <DataTable data={outputData.content} caption="Extracted Image Data (Table Format)" />;
+              const analysisData = outputData.content as ExtractStructuredDataFromImageOutput;
+              const hasTableData = analysisData.table && analysisData.table.length > 0;
+              const hasFullText = analysisData.fullText && analysisData.fullText.trim() !== '';
+              return (
+                <div>
+                  {hasTableData && (
+                    <>
+                      <h3 className="font-semibold mb-2 text-lg">Structured Data (Table Format)</h3>
+                      <DataTable data={analysisData.table} />
+                    </>
+                  )}
+                  {hasFullText && (
+                    <>
+                      <h3 className={`font-semibold mt-4 mb-2 text-lg ${hasTableData ? 'mt-6' : ''}`}>Full Extracted Text</h3>
+                      <pre className="whitespace-pre-wrap bg-muted p-4 rounded-md text-sm">{analysisData.fullText}</pre>
+                    </>
+                  )}
+                  {!hasTableData && !hasFullText && (
+                     <p className="text-muted-foreground">No data extracted from the image.</p>
+                  )}
+                </div>
+              );
             case 'documentAnalysis':
               return (
                  <div>
