@@ -77,7 +77,6 @@ export default function DataCapturePage() {
         return; 
       } else {
         addToHistory(`Uploaded document: ${file.name}`);
-        // Initialize with empty structure for loading state.
         setOutputData({ type: 'documentAnalysis', content: { extractedTable: { headers: [], rows: [] }, fullText: "" }, previewUrl: undefined });
         result = await handleDocumentUpload(dataUri);
       }
@@ -269,7 +268,9 @@ export default function DataCapturePage() {
                       <Skeleton className="h-20 w-full" />
                   </div>
               ) : hasTableData ? (
-                <DataTable headers={tableData.headers} rows={tableData.rows} />
+                <ScrollArea className="h-auto max-h-80">
+                  <DataTable headers={tableData.headers} rows={tableData.rows} />
+                </ScrollArea>
               ) : (
                 <p className="text-muted-foreground">No structured table data extracted from the image.</p>
               )}
@@ -340,12 +341,12 @@ export default function DataCapturePage() {
 
 
     if (!outputData) {
-        if (isLoading.imageUpload || isLoading.imageCapture || isLoadingDoc || isLoadingAnalysis) { // Check all relevant loading states
+        if (isLoading.imageUpload || isLoading.imageCapture || isLoadingDoc || isLoadingAnalysis) {
             return (
                 <div className="space-y-2">
                     <Skeleton className="h-8 w-1/3" />
                     <Skeleton className="h-20 w-full" />
-                    {(isLoadingDoc || isLoadingAnalysis) && ( // Specific skeleton for when full text might also be loading
+                    {(isLoadingDoc || isLoadingAnalysis) && ( 
                       <>
                         <Skeleton className="h-8 w-1/4 mt-4" />
                         <Skeleton className="h-16 w-full" />
