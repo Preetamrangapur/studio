@@ -257,7 +257,7 @@ export default function DataCapturePage() {
               <p className="font-semibold mb-2 text-lg">
                 {isLoadingAnalysis || !analysisData ? "Analyzing for structured data. Analyzing for full data." : "Analyzed Image"}
               </p>
-              <Image src={outputData.previewUrl} alt="Analyzed preview" width={200} height={150} className="rounded-md border object-contain w-full" data-ai-hint="document user content" />
+              <Image src={outputData.previewUrl} alt="Analyzed preview" width={150} height={100} className="rounded-md border object-contain w-full" data-ai-hint="document user content" />
             </div>
 
             <div className="md:w-2/3">
@@ -321,7 +321,7 @@ export default function DataCapturePage() {
                "Image"
               }
             </p>
-            <Image src={outputData.previewUrl} alt="Uploaded/Captured preview" width={200} height={150} className="rounded-md border object-contain w-full" data-ai-hint="document user content" />
+            <Image src={outputData.previewUrl} alt="Uploaded/Captured preview" width={150} height={100} className="rounded-md border object-contain w-full" data-ai-hint="document user content" />
           </div>
         )}
 
@@ -542,3 +542,4 @@ export default function DataCapturePage() {
     </>
   );
 }
+
