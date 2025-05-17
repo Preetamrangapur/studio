@@ -1,15 +1,14 @@
-
 // @ts-nocheck
 // TODO: Remove @ts-nocheck and fix errors
 "use server";
 
 import { aiAssistant } from "@/ai/flows/ai-assistant";
-import { analyzeUploadedDocument } from "@/ai/flows/analyze-uploaded-document";
+import { analyzeUploadedDocument, AnalyzeUploadedDocumentOutput } from "@/ai/flows/analyze-uploaded-document";
 import { extractStructuredDataFromImage, ExtractStructuredDataFromImageOutput } from "@/ai/flows/extract-structured-data-from-image";
 
 export interface ActionResult {
   success: boolean;
-  data?: any; // For text and document analysis, this can be string. For image, it's ExtractStructuredDataFromImageOutput
+  data?: any; // Can be string (AI assistant), ExtractStructuredDataFromImageOutput, or AnalyzeUploadedDocumentOutput
   error?: string;
   type?: 'text' | 'imageAnalysis' | 'documentAnalysis';
 }
@@ -29,9 +28,8 @@ export async function handleImageUpload(imageDataUri: string): Promise<ActionRes
     return { success: false, error: "Invalid image data URI." };
   }
   try {
-    // result will be of type ExtractStructuredDataFromImageOutput
     const result: ExtractStructuredDataFromImageOutput = await extractStructuredDataFromImage({ photoDataUri: imageDataUri });
-    return { success: true, data: result, type: 'imageAnalysis' }; // Return the entire result object
+    return { success: true, data: result, type: 'imageAnalysis' };
   } catch (error) {
     console.error("Error in handleImageUpload:", error);
     return { success: false, error: error instanceof Error ? error.message : "Failed to analyze image." };
@@ -43,8 +41,8 @@ export async function handleDocumentUpload(documentDataUri: string): Promise<Act
     return { success: false, error: "Invalid document data URI." };
   }
   try {
-    const result = await analyzeUploadedDocument({ documentDataUri });
-    return { success: true, data: result.analysisResult, type: 'documentAnalysis' };
+    const result: AnalyzeUploadedDocumentOutput = await analyzeUploadedDocument({ documentDataUri });
+    return { success: true, data: result, type: 'documentAnalysis' };
   } catch (error)
  {
     console.error("Error in handleDocumentUpload:", error);
@@ -59,4 +57,3 @@ export async function handleVoiceData( /* voiceData: any */ ): Promise<ActionRes
   // For example, if voice needs to be structured differently than plain text.
   return { success: false, error: "Voice processing flow not implemented yet." };
 }
-

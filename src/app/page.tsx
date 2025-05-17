@@ -1,4 +1,3 @@
-
 // @ts-nocheck
 // TODO: Remove @ts-nocheck and fix errors
 "use client";
@@ -25,12 +24,13 @@ import {
 } from "lucide-react";
 import { handleTextQuery, handleImageUpload, handleDocumentUpload, ActionResult } from './actions';
 import type { ExtractStructuredDataFromImageOutput } from "@/ai/flows/extract-structured-data-from-image";
+import type { AnalyzeUploadedDocumentOutput } from "@/ai/flows/analyze-uploaded-document";
 import DataTable from '@/components/DataTable';
 
 type OutputType = 'text' | 'imageAnalysis' | 'documentAnalysis' | 'imagePreview' | 'error';
 interface OutputData {
   type: OutputType;
-  content: any; // Can be string, ExtractStructuredDataFromImageOutput, etc.
+  content: any; // Can be string, ExtractStructuredDataFromImageOutput, AnalyzeUploadedDocumentOutput, etc.
   previewUrl?: string; // For image previews
 }
 
@@ -290,10 +290,26 @@ export default function DataCapturePage() {
                 </div>
               );
             case 'documentAnalysis':
+              const docData = outputData.content as AnalyzeUploadedDocumentOutput;
+              const hasDocTableData = docData.extractedTable && docData.extractedTable.length > 0;
+              const hasDocSummary = docData.summary && docData.summary.trim() !== '';
               return (
                  <div>
-                  <p className="font-semibold mb-2">Document Analysis Result:</p>
-                  <pre className="whitespace-pre-wrap bg-muted p-4 rounded-md text-sm">{outputData.content}</pre>
+                  {hasDocTableData && (
+                    <>
+                      <h3 className="font-semibold mb-2 text-lg">Extracted Document Table</h3>
+                      <DataTable data={docData.extractedTable} />
+                    </>
+                  )}
+                  {hasDocSummary && (
+                    <>
+                      <h3 className={`font-semibold mt-4 mb-2 text-lg ${hasDocTableData ? 'mt-6' : ''}`}>Document Summary</h3>
+                      <pre className="whitespace-pre-wrap bg-muted p-4 rounded-md text-sm">{docData.summary}</pre>
+                    </>
+                  )}
+                  {!hasDocTableData && !hasDocSummary && (
+                     <p className="text-muted-foreground">No data or summary extracted from the document.</p>
+                  )}
                  </div>
               );
             case 'imagePreview':
@@ -398,7 +414,7 @@ export default function DataCapturePage() {
         </div>
       )}
       
-      {(outputData || isLoading.imageAnalysis) && (
+      {(outputData || isLoading.imageAnalysis || isLoading.documentUpload) && (
         <Card className="w-full max-w-3xl mb-6 shadow-lg">
           <CardHeader>
             <CardTitle>Result</CardTitle>
@@ -417,4 +433,3 @@ export default function DataCapturePage() {
     </div>
   );
 }
-
