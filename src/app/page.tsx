@@ -32,8 +32,8 @@ import DataTable from '@/components/DataTable';
 type OutputType = 'text' | 'imageAnalysis' | 'documentAnalysis' | 'imagePreview' | 'error';
 interface OutputData {
   type: OutputType;
-  content: any; 
-  previewUrl?: string; 
+  content: any;
+  previewUrl?: string;
 }
 
 export default function DataCapturePage() {
@@ -63,7 +63,7 @@ export default function DataCapturePage() {
 
     const loaderKey = fileType === 'image' ? 'imageUpload' : 'documentUpload';
     setIsLoading(prev => ({ ...prev, [loaderKey]: true }));
-    setOutputData(null); 
+    setOutputData(null);
 
     const reader = new FileReader();
     reader.onloadend = async () => {
@@ -74,7 +74,7 @@ export default function DataCapturePage() {
         addToHistory(`Uploaded image: ${file.name}`);
         setOutputData({ type: 'imagePreview', content: null, previewUrl: dataUri });
         setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
-        return; 
+        return;
       } else {
         addToHistory(`Uploaded document: ${file.name}`);
         setOutputData({ type: 'documentAnalysis', content: { extractedTable: { headers: [], rows: [] }, fullText: "" }, previewUrl: undefined });
@@ -91,27 +91,27 @@ export default function DataCapturePage() {
       setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
     };
     reader.readAsDataURL(file);
-    event.target.value = ""; 
+    event.target.value = "";
   };
 
   const handleImageAnalysis = async () => {
     if (!outputData?.previewUrl) return;
     setIsLoading(prev => ({ ...prev, imageAnalysis: true }));
-    
+
     addToHistory('Extracting data from image.');
-    setOutputData(prev => ({ ...prev!, type: 'imageAnalysis', content: { table: { headers: [], rows: [] }, fullText: "" } })); 
+    setOutputData(prev => ({ ...prev!, type: 'imageAnalysis', content: { table: { headers: [], rows: [] }, fullText: "" } }));
     const result = await handleImageUpload(outputData.previewUrl);
 
     if (result.success) {
       setOutputData({ type: 'imageAnalysis', content: result.data as ExtractStructuredDataFromImageOutput, previewUrl: outputData.previewUrl });
       toast({ title: "Image Analyzed", description: "Data extraction complete." });
     } else {
-      setOutputData({ type: 'error', content: result.error, previewUrl: outputData.previewUrl }); 
+      setOutputData({ type: 'error', content: result.error, previewUrl: outputData.previewUrl });
       toast({ variant: "destructive", title: "Image Analysis Error", description: result.error });
     }
     setIsLoading(prev => ({ ...prev, imageAnalysis: false }));
   };
-  
+
 
   const handleSearch = async () => {
     if (!inputValue.trim()) return;
@@ -129,7 +129,7 @@ export default function DataCapturePage() {
     setInputValue("");
     setIsLoading(prev => ({ ...prev, search: false }));
   };
-  
+
   useEffect(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       console.warn('Speech Recognition API is not supported in this browser.');
@@ -140,7 +140,7 @@ export default function DataCapturePage() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognitionRef.current = new SpeechRecognition();
     const recognition = recognitionRef.current;
-    recognition.continuous = false; 
+    recognition.continuous = false;
     recognition.interimResults = true;
 
     recognition.onstart = () => {
@@ -160,8 +160,8 @@ export default function DataCapturePage() {
       }
       setOutputData({ type: 'text', content: interimTranscript || finalTranscript || 'Listening...' });
       if (finalTranscript) {
-        setInputValue(finalTranscript); 
-        recognition.stop(); 
+        setInputValue(finalTranscript);
+        recognition.stop();
       }
     };
 
@@ -228,14 +228,14 @@ export default function DataCapturePage() {
     if (context) {
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUri = canvas.toDataURL('image/png');
-      
-      setIsLoading(prev => ({ ...prev, imageCapture: true })); 
+
+      setIsLoading(prev => ({ ...prev, imageCapture: true }));
       setOutputData({ type: 'imagePreview', content: null, previewUrl: dataUri });
       addToHistory('Captured photo from camera.');
       setIsLoading(prev => ({ ...prev, imageCapture: false }));
     }
   };
-  
+
   const refreshPage = () => window.location.reload();
 
   const renderOutput = () => {
@@ -245,7 +245,7 @@ export default function DataCapturePage() {
     const isLoadingDoc = isLoading.documentUpload;
 
     if (outputData?.type === 'imageAnalysis' && outputData.previewUrl) {
-      const analysisData = outputData.content as ExtractStructuredDataFromImageOutput | null; 
+      const analysisData = outputData.content as ExtractStructuredDataFromImageOutput | null;
       const tableData = analysisData?.table;
       const hasTableData = !!(tableData && tableData.headers && tableData.headers.length > 0 && tableData.rows && tableData.rows.length > 0);
       const hasFullText = !!(analysisData?.fullText && analysisData.fullText.trim() !== '');
@@ -257,7 +257,7 @@ export default function DataCapturePage() {
               <p className="font-semibold mb-2 text-lg text-center md:text-left">
                 {isLoadingAnalysis || !analysisData ? "Analyzing..." : "Analyzed Image"}
               </p>
-              <Image src={outputData.previewUrl} alt="Analyzed preview" width={150} height={100} className="rounded-md border object-contain" data-ai-hint="document user content" />
+              <Image src={outputData.previewUrl} alt="Analyzed preview" width={150} height={100} className="rounded-md border object-contain" data-ai-hint="document user content"/>
             </div>
 
             <div className="md:w-2/3">
@@ -288,14 +288,14 @@ export default function DataCapturePage() {
               </ScrollArea>
             </>
           ) : null}
-          
+
           {!(isLoadingAnalysis || !analysisData) && !hasTableData && !hasFullText && (
              <p className="text-muted-foreground mt-4">No structured table or full text extracted from the image.</p>
           )}
         </>
       );
     }
-    
+
     if (outputData?.type === 'documentAnalysis') {
         const docData = outputData.content as AnalyzeUploadedDocumentOutput | null;
         const docTable = docData?.extractedTable;
@@ -329,7 +329,7 @@ export default function DataCapturePage() {
                 </ScrollArea>
               </>
             ) : null}
-            
+
             {!(isLoadingDoc || !docData) && !hasDocTableData && !hasDocFullText && (
                <p className="text-muted-foreground mt-4">No table data or full text extracted from the document.</p>
             )}
@@ -344,7 +344,7 @@ export default function DataCapturePage() {
                 <div className="space-y-2">
                     <Skeleton className="h-8 w-1/3" />
                     <Skeleton className="h-20 w-full" />
-                    {(isLoadingDoc || isLoadingAnalysis) && ( 
+                    {(isLoadingDoc || isLoadingAnalysis) && (
                       <>
                         <Skeleton className="h-8 w-1/4 mt-4" />
                         <Skeleton className="h-16 w-full" />
@@ -369,7 +369,7 @@ export default function DataCapturePage() {
                "Image"
               }
             </p>
-            <Image src={outputData.previewUrl} alt="Uploaded/Captured preview" width={150} height={100} className="rounded-md border object-contain" data-ai-hint="document user content" />
+            <Image src={outputData.previewUrl} alt="Uploaded/Captured preview" width={150} height={100} className="rounded-md border object-contain" data-ai-hint="document user content"/>
           </div>
         )}
 
@@ -386,7 +386,7 @@ export default function DataCapturePage() {
           switch (outputData.type) {
             case 'text':
               return <p className="text-foreground whitespace-pre-wrap">{outputData.content}</p>;
-            case 'imageAnalysis': 
+            case 'imageAnalysis':
               if (isLoadingAnalysis || !outputData.content) {
                  return (
                     <div>
@@ -480,7 +480,7 @@ export default function DataCapturePage() {
                       Upload Document
                       </Button>
                       <input type="file" ref={documentInputRef} onChange={(e) => handleFileChange(e, 'document')} accept=".pdf,.csv,.xls,.xlsx,.doc,.docx,.txt" className="hidden" />
-                      
+
                       <Button onClick={toggleVoiceRecording} variant={isRecording ? "destructive" : "default"} disabled={!recognitionRef.current} className="flex-grow sm:flex-grow-0">
                       {isRecording ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
                       {isRecording ? 'Stop Voice' : 'Start Voice'}
@@ -498,12 +498,12 @@ export default function DataCapturePage() {
                       </Button>
                       )}
                   </div>
-                  
+
                   <div className="flex gap-2 items-center">
-                      <Input 
-                      type="text" 
-                      placeholder="Or, ask anything..." 
-                      value={inputValue} 
+                      <Input
+                      type="text"
+                      placeholder="Or, ask anything..."
+                      value={inputValue}
                       onChange={(e) => setInputValue(e.target.value)}
                       onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
                       className="flex-grow"
@@ -526,13 +526,13 @@ export default function DataCapturePage() {
 
           {/* Right Pane - Results */}
           <div className="w-full lg:w-1/2">
-            {(outputData || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.imageUpload || isLoading.imageCapture || isLoading.search ) && ( 
+            {(outputData || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.imageUpload || isLoading.imageCapture || isLoading.search ) && (
               <Card className="w-full shadow-lg mt-6 lg:mt-0">
                 <CardHeader>
                   <CardTitle>Result</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ScrollArea className="max-h-[60rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-6rem)] p-1">
+                  <ScrollArea className="max-h-[75rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-4rem)] p-1">
                    {renderOutput()}
                   </ScrollArea>
                 </CardContent>
