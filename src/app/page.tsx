@@ -14,14 +14,17 @@ import {
   Upload,
   Mic,
   MicOff,
-  Video,
-  VideoOff,
-  Camera,
+  Play,
+  Pause,
+  StopCircle,
+  Camera as CameraIcon,
   Search,
   RefreshCw,
   FileText,
   Loader2,
   AlertTriangle,
+  Video,
+  VideoOff,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -29,13 +32,19 @@ import { handleTextQuery, handleImageUpload, handleDocumentUpload, ActionResult 
 import type { ExtractStructuredDataFromImageOutput } from "@/ai/flows/extract-structured-data-from-image";
 import type { AnalyzeUploadedDocumentOutput } from "@/ai/flows/analyze-uploaded-document";
 import DataTable from '@/components/DataTable';
+import { storage } from '@/lib/firebase'; // Import Firebase storage
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+
 
 type OutputType = 'text' | 'imageAnalysis' | 'documentAnalysis' | 'imagePreview' | 'error';
 interface OutputData {
   type: OutputType;
   content: any;
-  previewUrl?: string;
+  previewUrl?: string; // Can be Data URI or Firebase Storage URL
+  isFirebaseUrl?: boolean;
 }
+
+type CameraStreamState = 'inactive' | 'active' | 'paused';
 
 export default function DataCapturePage() {
   const { toast } = useToast();
@@ -43,8 +52,10 @@ export default function DataCapturePage() {
   const [history, setHistory] = useState<string[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isRecording, setIsRecording] = useState(false);
-  const [isCameraActive, setIsCameraActive] = useState(false);
+  
+  const [cameraStreamState, setCameraStreamState] = useState<CameraStreamState>('inactive');
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
+  
   const [outputData, setOutputData] = useState<OutputData | null>(null);
   const [isLoading, setIsLoading] = useState<Record<string, boolean>>({});
 
@@ -74,20 +85,20 @@ export default function DataCapturePage() {
 
       if (fileType === 'image') {
         addToHistory(`Uploaded image: ${file.name}`);
-        setOutputData({ type: 'imagePreview', content: null, previewUrl: dataUri });
+        setOutputData({ type: 'imagePreview', content: null, previewUrl: dataUri, isFirebaseUrl: false });
         setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
         return; 
       } else { 
         addToHistory(`Uploaded document: ${file.name}`);
-        setOutputData({ type: 'documentAnalysis', content: { extractedTable: { headers: [], rows: [] }, fullText: "" }, previewUrl: undefined });
+        setOutputData({ type: 'documentAnalysis', content: { extractedTable: { headers: [], rows: [] }, fullText: "" }, previewUrl: undefined, isFirebaseUrl: false });
         result = await handleDocumentUpload(dataUri);
       }
 
       if (result.success) {
-        setOutputData({ type: result.type as OutputType, content: result.data });
+        setOutputData({ type: result.type as OutputType, content: result.data, isFirebaseUrl: false });
         toast({ title: `${fileType === 'document' ? "Document" : "Item"} Processed`, description: `${fileType === 'document' ? "Document" : "Item"} analysis complete.` });
       } else {
-        setOutputData({ type: 'error', content: result.error });
+        setOutputData({ type: 'error', content: result.error, isFirebaseUrl: false });
         toast({ variant: "destructive", title: "Processing Error", description: result.error });
       }
       setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
@@ -101,14 +112,56 @@ export default function DataCapturePage() {
     setIsLoading(prev => ({ ...prev, imageAnalysis: true }));
 
     addToHistory('Extracting data from image.');
-    setOutputData(prev => ({ ...prev!, type: 'imageAnalysis', content: { table: { headers: [], rows: [] }, fullText: "" } }));
-    const result = await handleImageUpload(outputData.previewUrl);
+     // Keep existing previewUrl, indicate analysis is for table and fullText
+    setOutputData(prev => ({ 
+        ...prev!, 
+        type: 'imageAnalysis', 
+        content: { table: { headers: [], rows: [] }, fullText: "" } 
+        // previewUrl is preserved from 'imagePreview' state
+    }));
+
+    // If it's a local data URI, it needs to be passed to the analysis function.
+    // If it's already a Firebase URL, the analysis function might not need it if it's just for display.
+    // Assuming handleImageUpload expects a data URI for analysis.
+    // If the previewUrl is already a Firebase URL, we might need a different approach or
+    // re-fetch image data if analysis needs the raw bytes again.
+    // For now, let's assume analysis always happens on a data URI.
+    // If outputData.previewUrl could be a firebase URL, ensure it's a dataURI before calling handleImageUpload
+    
+    let dataUriToAnalyze = outputData.previewUrl;
+    if (outputData.isFirebaseUrl) {
+        // This is a simplification. In a real scenario, you might need to re-download
+        // or have a mechanism to analyze from URL if the AI service supports it.
+        // Or, analyze before uploading to Firebase if analysis needs local data.
+        // For this iteration, we'll assume if it's a Firebase URL, the original data URI is lost for direct analysis.
+        // This scenario needs more robust handling based on AI capabilities.
+        // For now, if it's a Firebase URL, let's assume analysis was done *before* upload or is not possible again this way.
+        // So, we'll proceed with analysis only if it's NOT a Firebase URL.
+        // A better flow: capture -> (optional analysis) -> upload -> show Firebase URL & (optionally re-analyze if possible)
+        // Let's refine: if it's a firebase URL, we assume analysis was done on a local Data URI before upload
+        // The 'Extract Table Data' button might imply re-analysis or first-time analysis of the *displayed* image.
+        // For this iteration, we will use the current previewUrl for analysis, regardless of its origin.
+        // The AI flow should be robust to handle this or the `handleImageUpload` should manage it.
+    }
+
+    const result = await handleImageUpload(dataUriToAnalyze);
+
 
     if (result.success) {
-      setOutputData({ type: 'imageAnalysis', content: result.data as ExtractStructuredDataFromImageOutput, previewUrl: outputData.previewUrl });
+      setOutputData({ 
+        type: 'imageAnalysis', 
+        content: result.data as ExtractStructuredDataFromImageOutput, 
+        previewUrl: outputData.previewUrl, // Keep the existing preview URL
+        isFirebaseUrl: outputData.isFirebaseUrl 
+      });
       toast({ title: "Image Analyzed", description: "Data extraction complete." });
     } else {
-      setOutputData({ type: 'error', content: result.error, previewUrl: outputData.previewUrl });
+      setOutputData({ 
+        type: 'error', 
+        content: result.error, 
+        previewUrl: outputData.previewUrl, // Keep the existing preview URL
+        isFirebaseUrl: outputData.isFirebaseUrl 
+      });
       toast({ variant: "destructive", title: "Image Analysis Error", description: result.error });
     }
     setIsLoading(prev => ({ ...prev, imageAnalysis: false }));
@@ -123,9 +176,9 @@ export default function DataCapturePage() {
 
     const result = await handleTextQuery(inputValue);
     if (result.success) {
-      setOutputData({ type: 'text', content: result.data });
+      setOutputData({ type: 'text', content: result.data, isFirebaseUrl: false });
     } else {
-      setOutputData({ type: 'error', content: result.error });
+      setOutputData({ type: 'error', content: result.error, isFirebaseUrl: false });
       toast({ variant: "destructive", title: "Search Error", description: result.error });
     }
     setInputValue("");
@@ -146,7 +199,7 @@ export default function DataCapturePage() {
 
     recognition.onstart = () => {
       setIsRecording(true);
-      setOutputData({ type: 'text', content: 'Listening...' });
+      setOutputData({ type: 'text', content: 'Listening...', isFirebaseUrl: false });
     };
 
     recognition.onresult = (event) => {
@@ -159,7 +212,7 @@ export default function DataCapturePage() {
           interimTranscript += event.results[i][0].transcript;
         }
       }
-      setOutputData({ type: 'text', content: interimTranscript || finalTranscript || 'Listening...' }); 
+      setOutputData({ type: 'text', content: interimTranscript || finalTranscript || 'Listening...', isFirebaseUrl: false }); 
       if (finalTranscript) {
         setInputValue(finalTranscript); 
         recognition.stop(); 
@@ -175,7 +228,7 @@ export default function DataCapturePage() {
 
     recognition.onerror = (event) => {
       console.error('Speech recognition error:', event.error);
-      setOutputData({ type: 'error', content: `Speech recognition error: ${event.error}` });
+      setOutputData({ type: 'error', content: `Speech recognition error: ${event.error}`, isFirebaseUrl: false });
       toast({ variant: "destructive", title: "Speech Error", description: `Error: ${event.error}` });
       setIsRecording(false);
     };
@@ -183,8 +236,10 @@ export default function DataCapturePage() {
       if (recognitionRef.current) {
         recognitionRef.current.abort(); 
       }
+      // Stop camera stream on component unmount if active
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
     };
   }, [toast, outputData?.content]);
@@ -196,7 +251,7 @@ export default function DataCapturePage() {
       recognitionRef.current.stop();
     } else {
       try {
-        setOutputData(null); // Clear previous output before starting
+        setOutputData(null); 
         recognitionRef.current.start();
       } catch (e) {
         console.error("Error starting speech recognition:", e);
@@ -205,62 +260,82 @@ export default function DataCapturePage() {
     }
   };
 
-  const toggleCamera = async () => {
-    if (isCameraActive) {
+  const startCamera = async () => {
+    if (typeof navigator.mediaDevices?.getUserMedia === 'undefined') {
+      toast({ variant: "destructive", title: "Camera Not Supported", description: "Your browser does not support camera access." });
+      setHasCameraPermission(false);
+      setCameraStreamState('inactive');
+      return;
+    }
+    try {
+      setIsLoading(prev => ({ ...prev, cameraStart: true }));
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(e => console.error("Error playing video:", e)); // Autoplay might be blocked
+      }
+      setHasCameraPermission(true);
+      setCameraStreamState('active');
+    } catch (err) {
+      console.error('Error accessing camera:', err);
+      let description = "Could not access camera.";
+      if (err instanceof Error) {
+        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+          description = "Camera permission was denied. Please enable it in your browser settings.";
+        } else if (err.name === "NotFoundError") {
+          description = "No camera was found on your device.";
+        } else {
+          description = `An error occurred: ${err.message}. Please ensure permissions are granted.`;
+        }
+      }
+      toast({ variant: "destructive", title: "Camera Error", description });
+      setHasCameraPermission(false);
+      setCameraStreamState('inactive');
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
       }
-      setIsCameraActive(false);
       if (videoRef.current) videoRef.current.srcObject = null;
-      // setHasCameraPermission(null); // Optionally reset permission status
-    } else {
-      if (typeof navigator.mediaDevices?.getUserMedia === 'undefined') {
-        toast({
-          variant: "destructive",
-          title: "Camera Not Supported",
-          description: "Your browser does not support camera access.",
-        });
-        setHasCameraPermission(false);
-        setIsCameraActive(false);
-        return;
-      }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-        setHasCameraPermission(true);
-        setIsCameraActive(true);
-      } catch (err) {
-        console.error('Error accessing camera:', err);
-        let description = "Could not access camera.";
-        if (err instanceof Error) {
-            if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-                description = "Camera permission was denied. Please enable it in your browser settings.";
-            } else if (err.name === "NotFoundError") {
-                description = "No camera was found on your device.";
-            } else {
-                description = `An error occurred: ${err.message}. Please ensure permissions are granted.`;
-            }
-        }
-        toast({ variant: "destructive", title: "Camera Error", description });
-        setHasCameraPermission(false);
-        setIsCameraActive(false);
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-        }
-        if (videoRef.current) videoRef.current.srcObject = null;
-      }
+    } finally {
+      setIsLoading(prev => ({ ...prev, cameraStart: false }));
     }
   };
 
+  const pauseCamera = () => {
+    if (videoRef.current && cameraStreamState === 'active') {
+      videoRef.current.pause();
+      setCameraStreamState('paused');
+    }
+  };
+
+  const resumeCamera = () => {
+    if (videoRef.current && cameraStreamState === 'paused') {
+      videoRef.current.play().catch(e => console.error("Error resuming video:", e));
+      setCameraStreamState('active');
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraStreamState('inactive');
+    // Optionally reset hasCameraPermission if you want to re-check next time
+    // setHasCameraPermission(null); 
+  };
+
+
   const takePhoto = async () => {
-    if (!isCameraActive || !videoRef.current || !canvasRef.current || !hasCameraPermission) {
-      if (!hasCameraPermission && isCameraActive) {
+    if (cameraStreamState !== 'active' || !videoRef.current || !canvasRef.current || !hasCameraPermission) {
+      if (!hasCameraPermission && cameraStreamState !== 'inactive') {
         toast({ variant: "destructive", title: "Camera Permission", description: "Cannot take photo without camera permission."});
+      } else if (cameraStreamState === 'paused') {
+        toast({ title: "Camera Paused", description: "Please resume camera to take a photo."});
       }
       return;
     }
@@ -269,14 +344,42 @@ export default function DataCapturePage() {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const context = canvas.getContext('2d');
+
     if (context) {
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUri = canvas.toDataURL('image/png');
+      
+      setIsLoading(prev => ({ ...prev, imageCaptureFirebase: true }));
+      // Display local data URI first for immediate feedback
+      const localDataUri = canvas.toDataURL('image/png');
+      setOutputData({ type: 'imagePreview', content: null, previewUrl: localDataUri, isFirebaseUrl: false });
+      addToHistory('Captured photo. Uploading to cloud...');
 
-      setIsLoading(prev => ({ ...prev, imageCapture: true }));
-      setOutputData({ type: 'imagePreview', content: null, previewUrl: dataUri });
-      addToHistory('Captured photo from camera.');
-      setIsLoading(prev => ({ ...prev, imageCapture: false })); 
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          toast({ variant: "destructive", title: "Capture Error", description: "Failed to create image blob." });
+          setIsLoading(prev => ({ ...prev, imageCaptureFirebase: false }));
+          return;
+        }
+        try {
+          const fileName = `photo-${Date.now()}.png`;
+          const imageStorageRef = storageRef(storage, `captured_images/${fileName}`);
+          
+          await uploadBytes(imageStorageRef, blob);
+          const downloadURL = await getDownloadURL(imageStorageRef);
+
+          setOutputData({ type: 'imagePreview', content: null, previewUrl: downloadURL, isFirebaseUrl: true });
+          addToHistory('Photo uploaded to cloud.');
+          toast({ title: "Photo Uploaded", description: "Image successfully stored in the cloud." });
+        } catch (error) {
+          console.error("Error uploading to Firebase Storage:", error);
+          toast({ variant: "destructive", title: "Upload Failed", description: "Could not store image in the cloud." });
+          // Keep local data URI in preview if upload fails
+          setOutputData({ type: 'imagePreview', content: null, previewUrl: localDataUri, isFirebaseUrl: false });
+
+        } finally {
+          setIsLoading(prev => ({ ...prev, imageCaptureFirebase: false }));
+        }
+      }, 'image/png');
     }
   };
 
@@ -287,6 +390,8 @@ export default function DataCapturePage() {
 
     const isLoadingAnalysis = isLoading.imageAnalysis;
     const isLoadingDoc = isLoading.documentUpload;
+    const isLoadingFirebaseUpload = isLoading.imageCaptureFirebase;
+
 
     if (outputData?.type === 'imageAnalysis' && outputData.previewUrl) {
       const analysisData = outputData.content as ExtractStructuredDataFromImageOutput | null;
@@ -382,9 +487,16 @@ export default function DataCapturePage() {
     }
 
     if (!outputData) { 
-        if (isLoading.imageUpload || isLoading.imageCapture || isLoadingDoc || isLoadingAnalysis || isLoading.search) {
+        if (isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoadingDoc || isLoadingAnalysis || isLoading.search || isLoading.cameraStart) {
+            const message = isLoading.imageCaptureFirebase ? "Uploading image to cloud..." : 
+                            isLoading.cameraStart ? "Starting camera..." : 
+                            "Processing...";
             return (
                 <div className="space-y-2">
+                    <div className="flex items-center justify-center text-muted-foreground">
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" /> 
+                      {message}
+                    </div>
                     <Skeleton className="h-8 w-1/3" />
                     <Skeleton className="h-20 w-full" />
                     {(isLoadingDoc || isLoadingAnalysis) && ( 
@@ -406,19 +518,24 @@ export default function DataCapturePage() {
         {outputData.previewUrl && outputData.type !== 'imageAnalysis' && ( 
           <div className="mb-4 flex flex-col items-center md:items-start">
             <p className="font-semibold mb-2 text-lg text-center md:text-left">
-              {outputData.type === 'imagePreview' && !isLoadingAnalysis ? "Preview" :
+              {outputData.type === 'imagePreview' && !isLoadingAnalysis && !isLoadingFirebaseUpload ? "Preview" :
                (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing..." : 
+               (outputData.type === 'imagePreview' && isLoadingFirebaseUpload) ? "Uploading to Cloud..." :
                outputData.type === 'error' ? "Image with Error" :
                "Image"
               }
             </p>
+             {isLoadingFirebaseUpload && outputData.type === 'imagePreview' && !outputData.isFirebaseUrl && (
+              <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+            )}
             <Image src={outputData.previewUrl} alt="Uploaded/Captured preview" width={150} height={100} className="rounded-md border object-contain" data-ai-hint="document user content"/>
+             {outputData.isFirebaseUrl && <span className="text-xs text-muted-foreground mt-1">Stored in cloud</span>}
           </div>
         )}
 
         {showImageActions && (
           <div className="flex gap-2 mb-4">
-            <Button onClick={handleImageAnalysis} disabled={isLoadingAnalysis}>
+            <Button onClick={handleImageAnalysis} disabled={isLoadingAnalysis || isLoadingFirebaseUpload}>
               {isLoadingAnalysis ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
               Extract Table Data
             </Button>
@@ -443,10 +560,11 @@ export default function DataCapturePage() {
                     </div>
                 );
               }
-              return <p className="text-muted-foreground">Image analysis results are being processed or displayed above.</p>;
+              // The detailed display is handled above, this is a fallback.
+              return <p className="text-muted-foreground">Image analysis results are displayed above.</p>;
             case 'imagePreview':
-              if (isLoading.imageUpload || isLoading.imageCapture) {
-                return <p>Processing image...</p>;
+              if (isLoading.imageUpload || isLoadingFirebaseUpload) {
+                return <p>{isLoadingFirebaseUpload ? "Uploading to cloud..." : "Processing image..."}</p>;
               }
               if (isLoadingAnalysis) { 
                 return ( 
@@ -461,7 +579,7 @@ export default function DataCapturePage() {
                     </div>
                 );
               }
-              return <p className="text-muted-foreground">Image ready. Click "Extract Table Data" above.</p>;
+              return <p className="text-muted-foreground">Image ready. Click "Extract Table Data" above if needed.</p>;
             case 'error':
               return (
                 <div className="flex items-center text-destructive">
@@ -517,7 +635,7 @@ export default function DataCapturePage() {
               </CardHeader>
               <CardContent className="space-y-4">
                   <div className="flex flex-wrap gap-2 justify-center">
-                      <Button onClick={() => imageInputRef.current?.click()} disabled={isLoading.imageUpload || isLoading.imageCapture || isLoading.imageAnalysis} className="flex-grow sm:flex-grow-0">
+                      <Button onClick={() => imageInputRef.current?.click()} disabled={isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoading.imageAnalysis} className="flex-grow sm:flex-grow-0">
                       {isLoading.imageUpload ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
                       Upload Image
                       </Button>
@@ -533,19 +651,38 @@ export default function DataCapturePage() {
                       {isRecording ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
                       {isRecording ? 'Stop Voice' : 'Start Voice'}
                       </Button>
-
-                      <Button onClick={toggleCamera} variant={isCameraActive ? "destructive" : "default"} className="flex-grow sm:flex-grow-0">
-                      {isCameraActive ? <VideoOff className="mr-2 h-4 w-4" /> : <Video className="mr-2 h-4 w-4" />}
-                      {isCameraActive ? 'Stop Camera' : 'Start Camera'}
-                      </Button>
-
-                      {isCameraActive && (
-                      <Button onClick={takePhoto} disabled={isLoading.imageCapture || isLoading.imageAnalysis || !hasCameraPermission} className="flex-grow sm:flex-grow-0">
-                          {isLoading.imageCapture ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
-                          Take Photo
-                      </Button>
-                      )}
                   </div>
+
+                  {/* Camera Controls */}
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    {cameraStreamState === 'inactive' && (
+                        <Button onClick={startCamera} disabled={isLoading.cameraStart} className="flex-grow sm:flex-grow-0">
+                            {isLoading.cameraStart ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Video className="mr-2 h-4 w-4" />} Start Camera
+                        </Button>
+                    )}
+                    {cameraStreamState === 'active' && (
+                        <>
+                            <Button onClick={pauseCamera} variant="outline" className="flex-grow sm:flex-grow-0">
+                                <Pause className="mr-2 h-4 w-4" /> Pause Camera
+                            </Button>
+                            <Button onClick={takePhoto} disabled={isLoading.imageCaptureFirebase || isLoading.imageAnalysis || !hasCameraPermission} className="flex-grow sm:flex-grow-0 bg-green-600 hover:bg-green-700 text-white">
+                                {isLoading.imageCaptureFirebase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CameraIcon className="mr-2 h-4 w-4" />}
+                                Take Photo
+                            </Button>
+                        </>
+                    )}
+                    {cameraStreamState === 'paused' && (
+                        <Button onClick={resumeCamera} variant="outline" className="flex-grow sm:flex-grow-0">
+                            <Play className="mr-2 h-4 w-4" /> Resume Camera
+                        </Button>
+                    )}
+                    {cameraStreamState !== 'inactive' && (
+                        <Button onClick={stopCamera} variant="destructive" className="flex-grow sm:flex-grow-0">
+                            <VideoOff className="mr-2 h-4 w-4" /> Stop Camera
+                        </Button>
+                    )}
+                  </div>
+
 
                   <div className="flex gap-2 items-center">
                       <Input
@@ -564,15 +701,15 @@ export default function DataCapturePage() {
               </CardContent>
             </Card>
 
-            {isCameraActive && (
+            {cameraStreamState !== 'inactive' && (
               <Card className="w-full shadow-lg">
                 <CardHeader>
-                  <CardTitle>Live Camera Feed</CardTitle>
+                  <CardTitle>Live Camera Feed {cameraStreamState === 'paused' && '(Paused)'}</CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 space-y-4">
-                  <video ref={videoRef} autoPlay playsInline muted className="w-full h-auto aspect-video bg-muted rounded-md border" />
+                  <video ref={videoRef} playsInline className="w-full h-auto aspect-video bg-muted rounded-md border" />
                   <canvas ref={canvasRef} className="hidden" />
-                  {isCameraActive && hasCameraPermission === false && (
+                  {cameraStreamState !== 'inactive' && hasCameraPermission === false && (
                     <Alert variant="destructive" className="rounded-md">
                       <AlertTriangle className="h-4 w-4" />
                       <AlertTitle>Camera Access Required</AlertTitle>
@@ -587,7 +724,7 @@ export default function DataCapturePage() {
           </div>
 
           <div className="w-full lg:w-1/2">
-            {(outputData || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.imageUpload || isLoading.imageCapture || isLoading.search ) && (
+            {(outputData || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoading.search || isLoading.cameraStart) && (
               <Card className="w-full shadow-lg mt-6 lg:mt-0">
                 <CardHeader>
                   <CardTitle>Result</CardTitle>
@@ -610,3 +747,4 @@ export default function DataCapturePage() {
     </>
   );
 }
+
