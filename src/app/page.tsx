@@ -268,15 +268,18 @@ export default function DataCapturePage() {
               return <p className="text-foreground whitespace-pre-wrap">{outputData.content}</p>;
             case 'imageAnalysis':
               const analysisData = outputData.content as ExtractStructuredDataFromImageOutput;
-              const hasTableData = analysisData.table && analysisData.table.length > 0;
+              const tableData = analysisData.table;
+              const hasTableData = tableData && tableData.headers && tableData.headers.length > 0 && tableData.rows;
               const hasFullText = analysisData.fullText && analysisData.fullText.trim() !== '';
               return (
                 <div>
-                  {hasTableData && (
+                  {hasTableData ? (
                     <>
                       <h3 className="font-semibold mb-2 text-lg">Structured Data (Table Format)</h3>
-                      <DataTable data={analysisData.table} />
+                      <DataTable headers={tableData.headers} rows={tableData.rows} />
                     </>
+                  ) : (
+                     <p className="text-muted-foreground">No structured table data extracted from the image.</p>
                   )}
                   {hasFullText && (
                     <>
@@ -285,19 +288,20 @@ export default function DataCapturePage() {
                     </>
                   )}
                   {!hasTableData && !hasFullText && (
-                     <p className="text-muted-foreground">No data extracted from the image.</p>
+                     <p className="text-muted-foreground">No data (table or text) extracted from the image.</p>
                   )}
                 </div>
               );
             case 'documentAnalysis':
               const docData = outputData.content as AnalyzeUploadedDocumentOutput;
-              const hasDocTableData = docData.extractedTable && docData.extractedTable.length > 0;
+              const docTable = docData.extractedTable;
+              const hasDocTableData = docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows;
               return (
                  <div>
                   {hasDocTableData ? (
                     <>
                       <h3 className="font-semibold mb-2 text-lg">Extracted Document Table</h3>
-                      <DataTable data={docData.extractedTable} />
+                      <DataTable headers={docTable.headers} rows={docTable.rows} />
                     </>
                   ) : (
                      <p className="text-muted-foreground">No table data extracted from the document.</p>
@@ -425,3 +429,4 @@ export default function DataCapturePage() {
     </div>
   );
 }
+
