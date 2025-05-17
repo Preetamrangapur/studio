@@ -6,13 +6,13 @@
 import { aiAssistant } from "@/ai/flows/ai-assistant";
 import { analyzeUploadedDocument } from "@/ai/flows/analyze-uploaded-document";
 import { extractStructuredDataFromImage } from "@/ai/flows/extract-structured-data-from-image";
-import { transcribeHandwriting } from "@/ai/flows/transcribe-handwriting-flow";
+// No longer importing transcribeHandwriting
 
 export interface ActionResult {
   success: boolean;
   data?: any;
   error?: string;
-  type?: 'text' | 'table' | 'imageAnalysis' | 'documentAnalysis' | 'handwritingTranscription';
+  type?: 'text' | 'imageAnalysis' | 'documentAnalysis'; // Removed 'handwritingTranscription'
 }
 
 export async function handleTextQuery(query: string): Promise<ActionResult> {
@@ -52,19 +52,7 @@ export async function handleDocumentUpload(documentDataUri: string): Promise<Act
   }
 }
 
-export async function handleHandwritingTranscription(imageDataUri: string): Promise<ActionResult> {
-  if (!imageDataUri || !imageDataUri.startsWith('data:image')) {
-    return { success: false, error: "Invalid image data URI for handwriting transcription." };
-  }
-  try {
-    const result = await transcribeHandwriting({ photoDataUri: imageDataUri });
-    return { success: true, data: result.transcribedText, type: 'handwritingTranscription' };
-  } catch (error) {
-    console.error("Error in handleHandwritingTranscription:", error);
-    return { success: false, error: error instanceof Error ? error.message : "Failed to transcribe handwriting from image." };
-  }
-}
-
+// Removed handleHandwritingTranscription function
 
 // Placeholder for voice processing if a specific AI flow is needed.
 // For now, voice input will be transcribed to text and can use handleTextQuery.
@@ -73,3 +61,4 @@ export async function handleVoiceData( /* voiceData: any */ ): Promise<ActionRes
   // For example, if voice needs to be structured differently than plain text.
   return { success: false, error: "Voice processing flow not implemented yet." };
 }
+
