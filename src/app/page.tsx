@@ -404,7 +404,7 @@ export default function DataCapturePage() {
             <CardTitle>Result</CardTitle>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="max-h-96">
+            <ScrollArea className="max-h-[40rem]">
              {renderOutput()}
             </ScrollArea>
           </CardContent>
