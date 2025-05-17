@@ -369,8 +369,8 @@ export default function DataCapturePage() {
     if (!data) return;
     const tableSource = (data as ExtractStructuredDataFromImageOutput).table || (data as AnalyzeUploadedDocumentOutput).extractedTable;
     
-    if (!tableSource || !tableSource.headers || !tableSource.rows) {
-      toast({ variant: "destructive", title: "CSV Export Error", description: "No table data available to export." });
+    if (!tableSource || !tableSource.headers || tableSource.headers.length === 0 || !tableSource.rows || tableSource.rows.length === 0) {
+      toast({ variant: "destructive", title: "CSV Export Error", description: "No structured table data available to export." });
       return;
     }
 
@@ -398,11 +398,9 @@ export default function DataCapturePage() {
   const handleDownloadPDF = (data: ExtractStructuredDataFromImageOutput | AnalyzeUploadedDocumentOutput | null) => {
     if (!data) return;
     const tableSource = (data as ExtractStructuredDataFromImageOutput).table || (data as AnalyzeUploadedDocumentOutput).extractedTable;
-    const fullText = (data as ExtractStructuredDataFromImageOutput).fullText || (data as AnalyzeUploadedDocumentOutput).fullText;
-
-
-    if ((!tableSource || tableSource.rows.length === 0) && !fullText) {
-        toast({ variant: "destructive", title: "PDF Export Error", description: "No data available to export." });
+    
+    if (!tableSource || !tableSource.headers || tableSource.headers.length === 0 || !tableSource.rows || tableSource.rows.length === 0) {
+        toast({ variant: "destructive", title: "PDF Export Error", description: "No structured table data available to export." });
         return;
     }
     
@@ -416,8 +414,7 @@ export default function DataCapturePage() {
     pdf.setFontSize(16);
     pdf.text("Extracted Data Report", margin, yPos);
     yPos += lineHeight * 2;
-    pdf.setFontSize(10);
-
+    
     if (tableSource && tableSource.headers && tableSource.rows && tableSource.rows.length > 0) {
       const { headers, rows } = tableSource;
       pdf.setFontSize(12);
@@ -457,30 +454,14 @@ export default function DataCapturePage() {
         yPos += maxRowHeight;
       });
       yPos += lineHeight; 
-    }
-
-    if (fullText) {
-      if (yPos > pageHeight - margin - lineHeight * 3) {
-        pdf.addPage();
-        yPos = margin;
-      }
-      pdf.setFontSize(12);
-      pdf.text("Full Extracted Text:", margin, yPos);
-      yPos += lineHeight * 1.5;
-      pdf.setFontSize(10);
-      const textLines = pdf.splitTextToSize(fullText, usableWidth);
-      textLines.forEach((line: string) => {
-        if (yPos > pageHeight - margin) {
-          pdf.addPage();
-          yPos = margin;
-        }
-        pdf.text(line, margin, yPos);
-        yPos += lineHeight;
-      });
+    } else {
+        // This case should ideally be caught by the initial check, but as a fallback:
+        pdf.setFontSize(10);
+        pdf.text("No structured table data was extracted.", margin, yPos);
     }
 
     pdf.save("extracted_data.pdf");
-    toast({ title: "PDF Downloaded", description: "Data exported as PDF." });
+    toast({ title: "PDF Downloaded", description: "Table data exported as PDF." });
   };
 
 
@@ -497,8 +478,8 @@ export default function DataCapturePage() {
     const showDownloadButtons = 
       outputData && !isLoadingAnalysis && !isLoadingDoc && !isLoadingFirebaseUpload &&
       (
-        (outputData.type === 'imageAnalysis' && analysisData && (analysisData.table?.rows?.length > 0 || analysisData.fullText)) ||
-        (outputData.type === 'documentAnalysis' && docData && (docData.extractedTable?.rows?.length > 0 || docData.fullText))
+        (outputData.type === 'imageAnalysis' && analysisData && analysisData.table?.rows?.length > 0) ||
+        (outputData.type === 'documentAnalysis' && docData && docData.extractedTable?.rows?.length > 0)
       );
 
     const currentDataForDownload = outputData?.content;
@@ -534,7 +515,7 @@ export default function DataCapturePage() {
           </div>
 
           {!(isLoadingAnalysis || !analysisData) && !hasTableData && (
-             <p className="text-muted-foreground mt-4">No structured table extracted from the image.</p>
+             <p className="text-muted-foreground mt-4">No structured table data extracted from the image.</p>
           )}
 
           {showDownloadButtons && (
@@ -566,11 +547,11 @@ export default function DataCapturePage() {
             ) : hasDocTableData ? (
               <DataTable headers={docTable.headers} rows={docTable.rows} />
             ) : (
-               <p className="text-muted-foreground">No table data extracted from the document.</p>
+               <p className="text-muted-foreground">No structured table data extracted from the document.</p>
             )}
             
             {!(isLoadingDoc || !docData) && !hasDocTableData && (
-               <p className="text-muted-foreground mt-4">No table data extracted from the document.</p>
+               <p className="text-muted-foreground mt-4">No structured table data extracted from the document.</p>
             )}
 
             {showDownloadButtons && (
@@ -591,7 +572,9 @@ export default function DataCapturePage() {
         if (isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoadingDoc || isLoadingAnalysis || isLoading.search || isLoading.cameraStart) {
             const message = isLoading.imageCaptureFirebase ? "Uploading image to cloud..." : 
                             isLoading.cameraStart ? "Starting camera..." : 
-                            (isLoadingAnalysis || isLoadingDoc) ? "Analyzing data..." :
+                            isLoadingAnalysis ? "Extracting structured data..." :
+                            isLoadingDoc ? "Analyzing document for table..." :
+                            isLoading.search ? "Searching..." :
                             "Processing...";
             return (
                 <div className="space-y-2">
@@ -615,7 +598,7 @@ export default function DataCapturePage() {
           <div className="mb-4 flex flex-col items-center md:items-start">
             <p className="font-semibold mb-2 text-lg text-center md:text-left">
               {outputData.type === 'imagePreview' && !isLoadingAnalysis && !isLoadingFirebaseUpload ? "Preview" :
-               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing data..." : 
+               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Extracting structured data..." : 
                (outputData.type === 'imagePreview' && isLoadingFirebaseUpload) ? "Uploading to Cloud..." :
                outputData.type === 'error' ? "Image with Error" :
                "Image"
@@ -646,7 +629,7 @@ export default function DataCapturePage() {
               if (isLoadingAnalysis || !outputData.content) {
                  return ( 
                     <div>
-                        <p className="font-semibold mb-2 text-lg">Analyzing data...</p>
+                        <p className="font-semibold mb-2 text-lg">Extracting structured data...</p>
                         <div className="space-y-2">
                             <Skeleton className="h-8 w-1/3" />
                             <Skeleton className="h-20 w-full" />
@@ -662,7 +645,7 @@ export default function DataCapturePage() {
               if (isLoadingAnalysis) { 
                 return ( 
                     <div>
-                        <p className="font-semibold mb-2 text-lg">Analyzing data...</p>
+                        <p className="font-semibold mb-2 text-lg">Extracting structured data...</p>
                         <div className="space-y-2">
                             <Skeleton className="h-8 w-1/3" />
                             <Skeleton className="h-20 w-full" />
@@ -818,7 +801,7 @@ export default function DataCapturePage() {
                   <CardTitle>Result</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ScrollArea className="max-h-[90rem] lg:max-h-[calc(100vh-6rem)] p-1">
+                  <ScrollArea className="max-h-[90rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-6rem)] p-1">
                    {renderOutput()}
                   </ScrollArea>
                 </CardContent>
@@ -835,3 +818,4 @@ export default function DataCapturePage() {
     </>
   );
 }
+
