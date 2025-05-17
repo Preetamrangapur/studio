@@ -1,7 +1,8 @@
+
 'use server';
 
 /**
- * @fileOverview Analyzes an uploaded document (PDF, Excel, or CSV) and extracts structured information.
+ * @fileOverview Analyzes an uploaded document (PDF, Excel, or CSV) and extracts structured information into a table.
  *
  * - analyzeUploadedDocument - A function that handles the document analysis process.
  * - AnalyzeUploadedDocumentInput - The input type for the analyzeUploadedDocument function.
@@ -21,13 +22,12 @@ const AnalyzeUploadedDocumentInputSchema = z.object({
 export type AnalyzeUploadedDocumentInput = z.infer<typeof AnalyzeUploadedDocumentInputSchema>;
 
 const TableRowSchema = z.object({
-  heading: z.string().describe('The heading of the row.'),
+  heading: z.string().describe('The heading of the row or column key.'),
   value: z.string().describe('The value associated with the heading.'),
 });
 
 const AnalyzeUploadedDocumentOutputSchema = z.object({
-  extractedTable: z.array(TableRowSchema).describe("Structured data extracted from the document, presented as an array of heading-value pairs. This can be an empty array if no structured data is found."),
-  summary: z.string().optional().describe("A brief textual summary of the document's content if no structured table can be extracted or as a supplement.")
+  extractedTable: z.array(TableRowSchema).describe("Structured data extracted from the document, presented as an array of heading-value pairs. This should be an empty array if no structured table can be formed."),
 });
 export type AnalyzeUploadedDocumentOutput = z.infer<typeof AnalyzeUploadedDocumentOutputSchema>;
 
@@ -43,16 +43,16 @@ const prompt = ai.definePrompt({
   output: {schema: AnalyzeUploadedDocumentOutputSchema},
   prompt: `You are an expert data analyst. Analyze the content of the uploaded document.
 
-Your primary goal is to extract structured information and present it as a table.
+Your primary and only goal is to extract structured information and present it as a table.
 The table should be an array of objects, where each object has a 'heading' and a 'value' property.
-If you find structured data, populate the 'extractedTable' field in the output.
+Populate the 'extractedTable' field in the output with this data.
 
-If the document does not contain clearly structured data suitable for a table, or if you can provide additional context, provide a textual summary in the 'summary' field.
-If structured data is extracted, the summary can be brief or omitted.
+If the document does not contain clearly structured data suitable for a table, return an empty array for 'extractedTable'.
+Do NOT provide any summary or textual explanation outside of the structured table format.
 
 Document: {{media url=documentDataUri}}
 
-Return the extracted table and/or summary according to the output schema.
+Return ONLY the extracted table according to the output schema.
 `,
 });
 

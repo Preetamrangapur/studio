@@ -292,23 +292,15 @@ export default function DataCapturePage() {
             case 'documentAnalysis':
               const docData = outputData.content as AnalyzeUploadedDocumentOutput;
               const hasDocTableData = docData.extractedTable && docData.extractedTable.length > 0;
-              const hasDocSummary = docData.summary && docData.summary.trim() !== '';
               return (
                  <div>
-                  {hasDocTableData && (
+                  {hasDocTableData ? (
                     <>
                       <h3 className="font-semibold mb-2 text-lg">Extracted Document Table</h3>
                       <DataTable data={docData.extractedTable} />
                     </>
-                  )}
-                  {hasDocSummary && (
-                    <>
-                      <h3 className={`font-semibold mt-4 mb-2 text-lg ${hasDocTableData ? 'mt-6' : ''}`}>Document Summary</h3>
-                      <pre className="whitespace-pre-wrap bg-muted p-4 rounded-md text-sm">{docData.summary}</pre>
-                    </>
-                  )}
-                  {!hasDocTableData && !hasDocSummary && (
-                     <p className="text-muted-foreground">No data or summary extracted from the document.</p>
+                  ) : (
+                     <p className="text-muted-foreground">No table data extracted from the document.</p>
                   )}
                  </div>
               );
