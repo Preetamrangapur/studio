@@ -2,7 +2,7 @@
 'use server';
 
 /**
- * @fileOverview Analyzes an uploaded document (PDF, Excel, or CSV) and extracts structured information into a multi-column table.
+ * @fileOverview Analyzes an uploaded document (PDF, Excel, or CSV) and extracts structured information into a multi-column table and full text content.
  *
  * - analyzeUploadedDocument - A function that handles the document analysis process.
  * - AnalyzeUploadedDocumentInput - The input type for the analyzeUploadedDocument function.
@@ -29,6 +29,7 @@ const ExtractedTableSchema = z.object({
 
 const AnalyzeUploadedDocumentOutputSchema = z.object({
   extractedTable: ExtractedTableSchema.describe("Structured data extracted from the document, presented as a table with headers and rows. If no structured table can be formed, return an object with empty headers and rows."),
+  fullText: z.string().describe('All text content extracted from the document. This can be an empty string if no text is found or if the document is purely image-based without OCR-able text.')
 });
 export type AnalyzeUploadedDocumentOutput = z.infer<typeof AnalyzeUploadedDocumentOutputSchema>;
 
@@ -42,22 +43,21 @@ const prompt = ai.definePrompt({
   name: 'analyzeUploadedDocumentPrompt',
   input: {schema: AnalyzeUploadedDocumentInputSchema},
   output: {schema: AnalyzeUploadedDocumentOutputSchema},
-  prompt: `You are an expert data analyst. Analyze the content of the uploaded document.
+  prompt: `You are an expert data analyst and document processor. Your task is to analyze the provided document and extract information in two ways:
 
-Your primary and only goal is to extract structured information and present it as a table with clear column headers and corresponding rows of data.
-The table should be an object with a 'headers' array (for column names) and a 'rows' array (where each sub-array is a row of cell values as strings).
-Populate the 'extractedTable' field in the output with this data.
+1.  **Structured Table**: If the document contains tabular data:
+    *   Identify the column headers.
+    *   Extract the data for each row under these headers.
+    *   Return this as an object with a 'headers' array (for column names) and a 'rows' array (where each sub-array is a row of cell values as strings).
+    *   The number of items in each 'row' array MUST strictly match the number of items in the 'headers' array.
+    *   If no discernible table structure (with headers and rows) is present, return an object with an empty 'headers' array and an empty 'rows' array for the 'extractedTable' field.
 
-*   Identify the column headers.
-*   Extract the data for each row under these headers.
-*   The number of items in each 'row' array MUST strictly match the number of items in the 'headers' array.
-
-If the document does not contain clearly structured data suitable for such a table, return an object with an empty 'headers' array and an empty 'rows' array for 'extractedTable'.
-Do NOT provide any summary or textual explanation outside of this structured table format.
+2.  **Full Text**: Extract all recognizable text content from the document as a single block of text. If no text is found, or if the document is purely image-based without OCR-able text, this should be an empty string for the 'fullText' field.
 
 Document: {{media url=documentDataUri}}
 
-Return ONLY the extracted table according to the output schema (headers and rows).
+Return BOTH the extracted table (following the 'headers' and 'rows' structure strictly for the 'extractedTable' field) AND the full text content (for the 'fullText' field) according to the output schema.
+Prioritize accuracy and structure for the table if one exists. If the document is primarily textual, focus on extracting the full text accurately.
 `,
 });
 
@@ -76,6 +76,10 @@ const analyzeUploadedDocumentFlow = ai.defineFlow(
         if (!output!.extractedTable.headers) output!.extractedTable.headers = [];
         if (!output!.extractedTable.rows) output!.extractedTable.rows = [];
     }
+    if (output!.fullText === undefined) {
+        output!.fullText = "";
+    }
     return output!;
   }
 );
+

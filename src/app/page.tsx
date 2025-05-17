@@ -77,7 +77,9 @@ export default function DataCapturePage() {
         return; 
       } else {
         addToHistory(`Uploaded document: ${file.name}`);
-        setOutputData({ type: 'documentAnalysis', content: { extractedTable: { headers: [], rows: [] } }, previewUrl: undefined });
+        // For documents, we immediately try to process.
+        // Initialize with empty structure for loading state.
+        setOutputData({ type: 'documentAnalysis', content: { extractedTable: { headers: [], rows: [] }, fullText: "" }, previewUrl: undefined });
         result = await handleDocumentUpload(dataUri);
       }
 
@@ -99,7 +101,8 @@ export default function DataCapturePage() {
     setIsLoading(prev => ({ ...prev, imageAnalysis: true }));
     
     addToHistory('Extracting data from image.');
-    setOutputData(prev => ({ ...prev!, type: 'imageAnalysis', content: null })); // Keep previewUrl, set content to null
+    // Initialize with empty structure for loading state, keep previewUrl
+    setOutputData(prev => ({ ...prev!, type: 'imageAnalysis', content: { table: { headers: [], rows: [] }, fullText: "" } })); 
     const result = await handleImageUpload(outputData.previewUrl);
 
     if (result.success) {
@@ -245,7 +248,7 @@ export default function DataCapturePage() {
     const isLoadingDoc = isLoading.documentUpload;
 
     if (outputData?.type === 'imageAnalysis' && outputData.previewUrl) {
-      const analysisData = outputData.content as ExtractStructuredDataFromImageOutput | null; // Can be null if loading
+      const analysisData = outputData.content as ExtractStructuredDataFromImageOutput | null; 
       const tableData = analysisData?.table;
       const hasTableData = !!(tableData && tableData.headers && tableData.headers.length > 0 && tableData.rows && tableData.rows.length > 0);
       const hasFullText = !!(analysisData?.fullText && analysisData.fullText.trim() !== '');
@@ -253,9 +256,9 @@ export default function DataCapturePage() {
       return (
         <>
           <div className="flex flex-col md:flex-row md:gap-6 mb-4">
-            <div className="md:w-1/3 mb-4 md:mb-0">
-              <p className="font-semibold mb-2 text-lg">
-                {isLoadingAnalysis || !analysisData ? "Analyzing for structured data. Analyzing for full data." : "Analyzed Image"}
+            <div className="md:w-1/3 mb-4 md:mb-0 flex flex-col items-center md:items-start">
+              <p className="font-semibold mb-2 text-lg text-center md:text-left">
+                {isLoadingAnalysis || !analysisData ? "Analyzing..." : "Analyzed Image"}
               </p>
               <Image src={outputData.previewUrl} alt="Analyzed preview" width={150} height={100} className="rounded-md border object-contain" data-ai-hint="document user content" />
             </div>
@@ -296,12 +299,60 @@ export default function DataCapturePage() {
       );
     }
     
+    if (outputData?.type === 'documentAnalysis') {
+        const docData = outputData.content as AnalyzeUploadedDocumentOutput | null;
+        const docTable = docData?.extractedTable;
+        const hasDocTableData = !!(docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows && docTable.rows.length > 0);
+        const hasFullText = !!(docData?.fullText && docData.fullText.trim() !== '');
+
+        return (
+           <div>
+            <h3 className="font-semibold mb-2 text-lg">Extracted Document Table</h3>
+            {isLoadingDoc || !docData ? (
+               <div className="space-y-2">
+                  <Skeleton className="h-8 w-1/3" />
+                  <Skeleton className="h-20 w-full" />
+              </div>
+            ) : hasDocTableData ? (
+              <DataTable headers={docTable.headers} rows={docTable.rows} />
+            ) : (
+               <p className="text-muted-foreground">No table data extracted from the document.</p>
+            )}
+
+            {(isLoadingDoc || !docData) ? (
+              <div className="mt-6 space-y-2">
+                <Skeleton className="h-8 w-1/4" />
+                <Skeleton className="h-16 w-full" />
+              </div>
+            ) : hasFullText ? (
+              <>
+                <h3 className="font-semibold mt-6 mb-2 text-lg">Full Extracted Text from Document</h3>
+                <ScrollArea className="h-auto max-h-60">
+                  <pre className="whitespace-pre-wrap bg-muted p-4 rounded-md text-sm">{docData.fullText}</pre>
+                </ScrollArea>
+              </>
+            ) : null}
+            
+            {!(isLoadingDoc || !docData) && !hasDocTableData && !hasFullText && (
+               <p className="text-muted-foreground mt-4">No table data or full text extracted from the document.</p>
+            )}
+           </div>
+        );
+    }
+
+
     if (!outputData) {
-        if (isLoadingAnalysis || isLoadingDoc || isLoading.imageUpload || isLoading.imageCapture) {
+        if (isLoading.imageUpload || isLoading.imageCapture || isLoadingDoc || isLoadingAnalysis) { // Check all relevant loading states
             return (
                 <div className="space-y-2">
                     <Skeleton className="h-8 w-1/3" />
                     <Skeleton className="h-20 w-full" />
+                    {(isLoadingDoc || isLoadingAnalysis) && ( // Specific skeleton for when full text might also be loading
+                      <>
+                        <Skeleton className="h-8 w-1/4 mt-4" />
+                        <Skeleton className="h-16 w-full" />
+                      </>
+                    )}
                 </div>
             );
         }
@@ -313,10 +364,10 @@ export default function DataCapturePage() {
     return (
       <>
         {outputData.previewUrl && outputData.type !== 'imageAnalysis' && (
-          <div className="mb-4">
-            <p className="font-semibold mb-2 text-lg">
+          <div className="mb-4 flex flex-col items-center md:items-start">
+            <p className="font-semibold mb-2 text-lg text-center md:text-left">
               {outputData.type === 'imagePreview' && !isLoadingAnalysis ? "Preview" :
-               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing for structured data. Analyzing for full data." :
+               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing..." :
                outputData.type === 'error' ? "Image with Error" :
                "Image"
               }
@@ -339,8 +390,8 @@ export default function DataCapturePage() {
             case 'text':
               return <p className="text-foreground whitespace-pre-wrap">{outputData.content}</p>;
             case 'imageAnalysis': 
-              // This case handles initial loading for imageAnalysis IF previewUrl was not available at the top-level check
-              // or if content is null (meaning it's loading but was set by handleImageAnalysis)
+              // This case is primarily hit if previewUrl wasn't set when the more specific layout was checked,
+              // or if it's still loading initial content before the detailed layout kicks in.
               if (isLoadingAnalysis || !outputData.content) {
                  return (
                     <div>
@@ -354,54 +405,13 @@ export default function DataCapturePage() {
                     </div>
                 );
               }
-              // This part should ideally not be reached if outputData.previewUrl was set, as it's handled above.
-              // This is a fallback for imageAnalysis data display if the specialized layout wasn't triggered.
-              const analysisData = outputData.content as ExtractStructuredDataFromImageOutput;
-              const tableData = analysisData.table;
-              const hasTableData = tableData && tableData.headers && tableData.headers.length > 0 && tableData.rows && tableData.rows.length > 0;
-              const hasFullText = analysisData.fullText && analysisData.fullText.trim() !== '';
-              return (
-                <div>
-                  <h3 className="font-semibold mb-2 text-lg">Structured Data (Table Format)</h3>
-                  {hasTableData ? (
-                    <DataTable headers={tableData.headers} rows={tableData.rows} />
-                  ) : (
-                    <p className="text-muted-foreground">No structured table data extracted from the image.</p>
-                  )}
-                  {hasFullText && (
-                    <>
-                      <h3 className="font-semibold mt-4 mb-2 text-lg">Full Extracted Text</h3>
-                       <ScrollArea className="h-auto max-h-60">
-                        <pre className="whitespace-pre-wrap bg-muted p-4 rounded-md text-sm">{analysisData.fullText}</pre>
-                       </ScrollArea>
-                    </>
-                  )}
-                  {!hasTableData && !hasFullText && (
-                     <p className="text-muted-foreground">No data (table or text) extracted from the image.</p>
-                  )}
-                </div>
-              );
-            case 'documentAnalysis':
-              const docData = outputData.content as AnalyzeUploadedDocumentOutput;
-              const docTable = docData.extractedTable;
-              const hasDocTableData = docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows && docTable.rows.length > 0;
-              return (
-                 <div>
-                  {isLoadingDoc ? (
-                     <div className="space-y-2">
-                        <Skeleton className="h-8 w-1/3" />
-                        <Skeleton className="h-20 w-full" />
-                    </div>
-                  ) : hasDocTableData ? (
-                    <>
-                      <h3 className="font-semibold mb-2 text-lg">Extracted Document Table</h3>
-                      <DataTable headers={docTable.headers} rows={docTable.rows} />
-                    </>
-                  ) : (
-                     <p className="text-muted-foreground">No table data extracted from the document.</p>
-                  )}
-                 </div>
-              );
+              // Fallback display if not handled by the primary imageAnalysis block.
+              // Should ideally be covered by the top-level imageAnalysis check.
+              return <p className="text-muted-foreground">Image analysis results are being processed or displayed above.</p>;
+            
+            // Document analysis is now handled by its own specific block above this switch
+            // case 'documentAnalysis': ...
+
             case 'imagePreview':
               if (isLoading.imageUpload || isLoading.imageCapture) {
                 return <p>Processing image...</p>;
@@ -422,6 +432,17 @@ export default function DataCapturePage() {
                 </div>
               );
             default:
+              // This will catch 'documentAnalysis' if not handled by its specific block above,
+              // or any other unhandled type.
+              // For loading general states not covered by imagePreview or initial analysis skeletons:
+               if (isLoading.search || Object.values(isLoading).some(val => val === true && !outputData)) {
+                 return (
+                    <div className="space-y-2">
+                        <Skeleton className="h-8 w-1/3" />
+                        <Skeleton className="h-20 w-full" />
+                    </div>
+                  );
+               }
               return null;
           }
         })()}
@@ -472,7 +493,7 @@ export default function DataCapturePage() {
                       {isLoading.documentUpload ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
                       Upload Document
                       </Button>
-                      <input type="file" ref={documentInputRef} onChange={(e) => handleFileChange(e, 'document')} accept=".pdf,.csv,.xls,.xlsx" className="hidden" />
+                      <input type="file" ref={documentInputRef} onChange={(e) => handleFileChange(e, 'document')} accept=".pdf,.csv,.xls,.xlsx,.doc,.docx,.txt" className="hidden" />
                       
                       <Button onClick={toggleVoiceRecording} variant={isRecording ? "destructive" : "default"} disabled={!recognitionRef.current} className="flex-grow sm:flex-grow-0">
                       {isRecording ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
@@ -519,13 +540,13 @@ export default function DataCapturePage() {
 
           {/* Right Pane - Results */}
           <div className="w-full lg:w-1/2">
-            {(outputData || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.imageUpload || isLoading.imageCapture ) && ( 
+            {(outputData || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.imageUpload || isLoading.imageCapture || isLoading.search ) && ( 
               <Card className="w-full shadow-lg mt-6 lg:mt-0">
                 <CardHeader>
                   <CardTitle>Result</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ScrollArea className="max-h-[40rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-10rem)]">
+                  <ScrollArea className="max-h-[40rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-10rem)] p-1"> {/* Added p-1 for slight padding */}
                    {renderOutput()}
                   </ScrollArea>
                 </CardContent>
@@ -542,3 +563,4 @@ export default function DataCapturePage() {
     </>
   );
 }
+
