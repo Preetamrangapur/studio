@@ -257,6 +257,8 @@ export default function DataCapturePage() {
           setHasCameraPermission(true);
           setCameraStreamState('active');
         } else {
+          // Fallback for browsers that don't return a promise from play()
+          // or if playPromise resolves immediately without error.
           setHasCameraPermission(true);
           setCameraStreamState('active');
         }
@@ -601,7 +603,7 @@ export default function DataCapturePage() {
             const message = isLoading.imageCaptureFirebase ? "Uploading image to cloud..." : 
                             isLoading.cameraStart ? "Starting camera..." : 
                             isLoadingAnalysis ? "Extracting structured data..." :
-                            isLoadingDoc ? "Analyzing document for table..." :
+                            isLoadingDoc ? "Analyzing document..." :
                             isLoading.search ? "Searching..." :
                             "Processing...";
             return (
@@ -665,12 +667,13 @@ export default function DataCapturePage() {
                     </div>
                 );
               }
+              // Already handled by the specific layout above, so this case might just be a fallback.
               return <p className="text-muted-foreground">Image analysis results are displayed above.</p>;
             case 'documentAnalysis':
                  if (isLoadingDoc || !outputData.content) {
                      return ( 
                         <div>
-                            <p className="font-semibold mb-2 text-lg">Analyzing document for table...</p>
+                            <p className="font-semibold mb-2 text-lg">Analyzing document...</p>
                             <div className="space-y-2">
                                 <Skeleton className="h-8 w-1/3" />
                                 <Skeleton className="h-20 w-full" />
@@ -678,6 +681,7 @@ export default function DataCapturePage() {
                         </div>
                     );
                 }
+                 // Already handled by the specific layout above for document table.
                 return <p className="text-muted-foreground">Document analysis results are displayed above.</p>;
             case 'imagePreview':
               if (isLoading.imageUpload || isLoadingFirebaseUpload) {
@@ -857,7 +861,7 @@ export default function DataCapturePage() {
                   <CardTitle>Result</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ScrollArea className="max-h-[90rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-6rem)] p-1">
+                  <ScrollArea className="max-h-[120rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-4rem)] p-1">
                    {renderOutput()}
                   </ScrollArea>
                 </CardContent>
@@ -874,4 +878,3 @@ export default function DataCapturePage() {
     </>
   );
 }
-
