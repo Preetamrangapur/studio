@@ -153,7 +153,7 @@ export default function DataCapturePage() {
 
     recognition.continuous = false; 
     recognition.interimResults = true;
-    recognition.lang = 'en-US'; // Explicitly set language
+    recognition.lang = 'en-US';
 
     recognition.onstart = () => {
       setIsRecording(true);
@@ -170,7 +170,9 @@ export default function DataCapturePage() {
           interimTranscript += event.results[i][0].transcript;
         }
       }
-      setOutputData({ type: 'text', content: interimTranscript || finalTranscript || 'Listening...', isFirebaseUrl: false }); 
+      // Display interim results, but keep "Listening..." if final is not yet available and interim is empty
+      const currentDisplay = interimTranscript || (finalTranscript ? finalTranscript : 'Listening...');
+      setOutputData({ type: 'text', content: currentDisplay, isFirebaseUrl: false }); 
       
       if (finalTranscript) {
         setInputValue(finalTranscript); 
@@ -182,17 +184,19 @@ export default function DataCapturePage() {
       // Use functional updates to safely access latest state
       setInputValue(currentInputValue => {
         setOutputData(currentOutputData => {
-          if (currentInputValue === '' && currentOutputData && currentOutputData.type === 'text' && currentOutputData.content === 'Listening...') {
-            return null; // Clear "Listening..." if no final input and it's still showing
+          // Clear "Listening..." or "Initializing..." if no speech was captured and these were the last messages
+          if (currentInputValue === '' && currentOutputData && currentOutputData.type === 'text' && 
+              (currentOutputData.content === 'Listening...' || currentOutputData.content === 'Initializing voice input...')) {
+            return null; 
           }
           return currentOutputData;
         });
-        return currentInputValue; // inputValue itself is not changed by this onend logic
+        return currentInputValue;
       });
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      console.error('Speech recognition error:', event.error);
+      console.error('Speech recognition error:', event.error, event.message);
       let errorMessage = `Speech recognition error: ${event.error}`;
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         errorMessage = "Microphone permission denied. Please enable it in your browser settings.";
@@ -200,6 +204,8 @@ export default function DataCapturePage() {
         errorMessage = "No speech detected. Please try again.";
       } else if (event.error === 'aborted') {
         errorMessage = "Voice input was cancelled or an unexpected error occurred.";
+      } else {
+        errorMessage = `Voice input error: ${event.message || event.error}. Try again.`;
       }
       setOutputData({ type: 'error', content: errorMessage, isFirebaseUrl: false });
       toast({ variant: "destructive", title: "Speech Error", description: errorMessage });
@@ -209,7 +215,6 @@ export default function DataCapturePage() {
     return () => {
       if (recognitionRef.current) {
         recognitionRef.current.abort();
-        // Remove event listeners
         recognitionRef.current.onstart = null;
         recognitionRef.current.onresult = null;
         recognitionRef.current.onend = null;
@@ -220,7 +225,7 @@ export default function DataCapturePage() {
         streamRef.current = null;
       }
     };
-  }, []); // Empty dependency array ensures this runs once on mount
+  }, []);
 
 
   const toggleVoiceRecording = () => {
@@ -236,16 +241,19 @@ export default function DataCapturePage() {
       recognitionRef.current.stop();
     } else {
       try {
-        setOutputData(null); 
         setInputValue("");    
+        setOutputData({ type: 'text', content: 'Initializing voice input...', isFirebaseUrl: false });
         recognitionRef.current.start();
       } catch (e) {
         console.error("Error starting speech recognition:", e);
         let description = "Could not start voice recording.";
         if (e instanceof Error && e.name === 'InvalidStateError') {
           description = "Voice recognition is already active or in an invalid state. Please try again shortly.";
+        } else if (e instanceof Error) {
+          description = e.message;
         }
         toast({ variant: "destructive", title: "Speech Error", description });
+        setOutputData({ type: 'error', content: description, isFirebaseUrl: false });
         setIsRecording(false); 
       }
     }
@@ -264,11 +272,10 @@ export default function DataCapturePage() {
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play(); // Ensure play is awaited
+        await videoRef.current.play(); 
         setHasCameraPermission(true);
         setCameraStreamState('active');
       } else {
-        // This case should ideally not be reached if videoRef is always rendered
         throw new Error("Video element reference not found. Cannot display camera stream.");
       }
     } catch (err) {
@@ -298,7 +305,7 @@ export default function DataCapturePage() {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
       }
-      if (videoRef.current) videoRef.current.srcObject = null; // Clear srcObject on error
+      if (videoRef.current) videoRef.current.srcObject = null;
     } finally {
       setIsLoading(prev => ({ ...prev, cameraStart: false }));
     }
@@ -319,7 +326,7 @@ export default function DataCapturePage() {
 
   const takePhoto = async () => {
     if (cameraStreamState !== 'active' || !videoRef.current || !canvasRef.current || !hasCameraPermission) {
-      if (cameraStreamState === 'active' && !hasCameraPermission) { // Check specific case
+      if (cameraStreamState === 'active' && !hasCameraPermission) { 
         toast({ variant: "destructive", title: "Camera Permission", description: "Cannot take photo without camera permission."});
       }
       return;
@@ -505,6 +512,7 @@ export default function DataCapturePage() {
     const currentOutputContent = outputData?.content;
     const tableSource = currentOutputContent?.table || currentOutputContent?.extractedTable;
     const hasTableData = !!(tableSource && tableSource.headers && tableSource.headers.length > 0 && tableSource.rows && tableSource.rows.length > 0);
+    const fullTextContent = currentOutputContent?.fullText;
 
     const showDownloadButtons = 
       outputData && !isLoadingAnalysis && !isLoadingFirebaseUpload && hasTableData;
@@ -564,7 +572,6 @@ export default function DataCapturePage() {
         const docData = outputData.content as AnalyzeUploadedDocumentOutput | null;
         const docTable = docData?.extractedTable;
         const currentHasDocTableData = !!(docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows && docTable.rows.length > 0);
-        const fullText = docData?.fullText;
 
 
         return (
@@ -585,8 +592,6 @@ export default function DataCapturePage() {
                <p className="text-muted-foreground mt-4">No structured table data extracted from the document.</p>
             )}
             
-            {/* Removed full text display for document as per previous request, but keeping data available */}
-
             {showDownloadButtons && (
                 <div className="mt-6 flex gap-2">
                 <Button onClick={() => handleDownloadCSV(currentDataForDownload)} variant="outline">
@@ -670,8 +675,6 @@ export default function DataCapturePage() {
                     </div>
                 );
               }
-              // The detailed table rendering is handled by specific if-blocks above.
-              // This path is for when those blocks have rendered or if data is minimal.
               return <p className="text-muted-foreground">Analysis results are displayed above.</p>;
             case 'imagePreview':
               if (isLoading.imageUpload || isLoadingFirebaseUpload) {
@@ -749,7 +752,7 @@ export default function DataCapturePage() {
                       </Button>
                       <input type="file" ref={imageInputRef} onChange={handleImageFileChange} accept="image/*" className="hidden" />
 
-                      <Button onClick={toggleVoiceRecording} variant={isRecording ? "destructive" : "default"} disabled={!recognitionRef.current && !isLoading.speechInit}  className="flex-grow sm:flex-grow-0">
+                      <Button onClick={toggleVoiceRecording} variant={isRecording ? "destructive" : "default"} disabled={!recognitionRef.current}  className="flex-grow sm:flex-grow-0">
                       {isRecording ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
                       {isRecording ? 'Stop Voice' : 'Start Voice'}
                       </Button>
@@ -792,7 +795,6 @@ export default function DataCapturePage() {
               </CardContent>
             </Card>
 
-            {/* Camera Feed Card - Always rendered but content visibility is conditional */}
             <Card className="w-full shadow-lg">
               <CardHeader>
                 <CardTitle>
@@ -800,7 +802,6 @@ export default function DataCapturePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-4 space-y-2">
-                {/* Video element is always in the DOM if camera card is shown */}
                 <video 
                     ref={videoRef} 
                     playsInline 
@@ -808,7 +809,7 @@ export default function DataCapturePage() {
                     muted 
                     className={cn(
                         "w-full h-auto aspect-video bg-muted rounded-md border",
-                        cameraStreamState === 'inactive' && 'hidden' // Hide video element if inactive
+                        cameraStreamState === 'inactive' && 'hidden' 
                     )} 
                 />
                 <canvas ref={canvasRef} className="hidden" /> 
@@ -832,9 +833,8 @@ export default function DataCapturePage() {
             </Card>
           </div>
 
-          {/* Right column - only shown if there's output or loading state */}
-          { (outputData || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoading.search || isLoading.cameraStart) && (
-            <div className="w-full lg:w-3/5 mt-6 lg:mt-0"> {/* Right column */}
+          { (outputData || Object.values(isLoading).some(Boolean)) && (
+            <div className="w-full lg:w-3/5 mt-6 lg:mt-0"> 
               <Card className="w-full shadow-lg">
                 <CardHeader>
                   <CardTitle>Result</CardTitle>
@@ -858,3 +858,5 @@ export default function DataCapturePage() {
   );
 }
 
+
+    
