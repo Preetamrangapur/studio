@@ -62,7 +62,7 @@ export default function DataCapturePage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const documentInputRef = useRef<HTMLInputElement>(null);
+  // const documentInputRef = useRef<HTMLInputElement>(null); // Document input ref removed as per user request
 
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -104,7 +104,6 @@ export default function DataCapturePage() {
       const dataUri = reader.result as string;
       addToHistory(`Uploaded document: ${file.name}`);
       
-      // Directly call handleDocumentUpload action
       const result = await handleDocumentUpload(dataUri);
       if (result.success) {
         setOutputData({ type: 'documentAnalysis', content: result.data as AnalyzeUploadedDocumentOutput, isFirebaseUrl: false });
@@ -116,7 +115,7 @@ export default function DataCapturePage() {
       setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
     };
     reader.readAsDataURL(file);
-    event.target.value = ""; // Clear the input
+    // event.target.value = ""; // Clear the input - not needed if documentInputRef is removed
   };
 
   const handleImageAnalysis = async () => {
@@ -174,8 +173,7 @@ export default function DataCapturePage() {
  useEffect(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       console.warn('Speech Recognition API is not supported in this browser.');
-      // Optionally, disable the voice input button or show a toast message
-      if (recognitionRef) recognitionRef.current = null; // Ensure it's null if not supported
+      if (recognitionRef) recognitionRef.current = null; 
       return;
     }
 
@@ -203,7 +201,7 @@ export default function DataCapturePage() {
         }
       }
       const currentDisplay = interimTranscript || (finalTranscript ? finalTranscript : 'Listening...');
-      setOutputData({ type: 'text', content: currentDisplay, isFirebaseUrl: false }); 
+      setOutputData(prevOutput => ({ ...prevOutput, type: 'text', content: currentDisplay, isFirebaseUrl: false })); 
       
       if (finalTranscript) {
         setInputValue(finalTranscript); 
@@ -232,7 +230,7 @@ export default function DataCapturePage() {
       } else if (event.error === 'no-speech') {
         errorMessage = "No speech detected. Please try again.";
       } else if (event.error === 'aborted') {
-         errorMessage = "Voice input cancelled or an unexpected error occurred.";
+         errorMessage = "Voice input cancelled or an unexpected error occurred. Please try again.";
       } else {
         errorMessage = `Voice input error: ${event.message || event.error}. Try again.`;
       }
@@ -254,7 +252,6 @@ export default function DataCapturePage() {
         streamRef.current = null;
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
 
@@ -600,6 +597,7 @@ export default function DataCapturePage() {
     if (outputData?.type === 'documentAnalysis') {
         const docData = outputData.content as AnalyzeUploadedDocumentOutput | null;
         const docTable = docData?.extractedTable;
+        // const docFullText = docData?.fullText; // Removed from direct display
         const currentHasDocTableData = !!(docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows && docTable.rows.length > 0);
 
         return (
@@ -620,6 +618,8 @@ export default function DataCapturePage() {
                <p className="text-muted-foreground mt-4">No structured table data extracted from the document.</p>
             )}
             
+            {/* Removed full text display for document analysis */}
+
             {showDownloadButtons && (
                 <div className="mt-6 flex gap-2">
                 <Button onClick={() => handleDownloadCSV(currentDataForDownload)} variant="outline">
@@ -781,11 +781,8 @@ export default function DataCapturePage() {
                       </Button>
                       <input type="file" ref={imageInputRef} onChange={handleImageFileChange} accept="image/*" className="hidden" />
 
-                      {/* <Button onClick={() => documentInputRef.current?.click()} disabled={isLoading.documentUpload} className="flex-grow sm:flex-grow-0">
-                        {isLoading.documentUpload ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                        Upload Document
-                      </Button> */}
-                      <input type="file" ref={documentInputRef} onChange={handleDocumentFileChange} accept=".pdf,.csv,.xls,.xlsx" className="hidden" />
+                      {/* Upload Document button removed */}
+                      {/* <input type="file" ref={documentInputRef} onChange={handleDocumentFileChange} accept=".pdf,.csv,.xls,.xlsx" className="hidden" /> */}
 
 
                       <Button onClick={toggleVoiceRecording} variant={isRecording ? "destructive" : "default"} disabled={!recognitionRef.current}  className="flex-grow sm:flex-grow-0">
@@ -877,7 +874,7 @@ export default function DataCapturePage() {
                   <CardTitle>Result</CardTitle>
                 </CardHeader>
                 <CardContent>
-                   <ScrollArea className="max-h-[200rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem))] p-1">
+                   <ScrollArea className="max-h-[300rem] p-1">
                    {renderOutput()}
                   </ScrollArea>
                 </CardContent>
@@ -894,6 +891,3 @@ export default function DataCapturePage() {
     </>
   );
 }
-
-
-    
