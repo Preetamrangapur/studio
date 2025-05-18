@@ -27,9 +27,9 @@ import {
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { handleTextQuery, handleImageUpload, ActionResult } from './actions';
+import { handleTextQuery, handleImageUpload, handleDocumentUpload, ActionResult } from './actions';
 import type { ExtractStructuredDataFromImageOutput } from "@/ai/flows/extract-structured-data-from-image";
-import type { AnalyzeUploadedDocumentOutput } from "@/ai/flows/analyze-uploaded-document"; // Still needed for PDF/CSV download types
+import type { AnalyzeUploadedDocumentOutput } from "@/ai/flows/analyze-uploaded-document"; 
 import DataTable from '@/components/DataTable';
 import { storage } from '@/lib/firebase'; 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -45,7 +45,7 @@ interface OutputData {
   isFirebaseUrl?: boolean;
 }
 
-type CameraState = 'inactive' | 'active'; // Simplified camera state
+type CameraStreamState = 'inactive' | 'active' | 'paused_unsupported'; 
 
 export default function DataCapturePage() {
   const { toast } = useToast();
@@ -54,7 +54,7 @@ export default function DataCapturePage() {
   const [inputValue, setInputValue] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   
-  const [cameraState, setCameraState] = useState<CameraState>('inactive'); // Updated state name
+  const [cameraStreamState, setCameraStreamState] = useState<CameraStreamState>('inactive');
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   
   const [outputData, setOutputData] = useState<OutputData | null>(null);
@@ -63,7 +63,7 @@ export default function DataCapturePage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  // const documentInputRef = useRef<HTMLInputElement>(null); // Removed
+
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -71,7 +71,6 @@ export default function DataCapturePage() {
     setHistory(prev => [item, ...prev.slice(0, 4)]);
   };
 
-  // Simplified handleFileChange to only handle images
   const handleImageFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -89,6 +88,43 @@ export default function DataCapturePage() {
     };
     reader.readAsDataURL(file);
     event.target.value = ""; 
+  };
+
+  const handleDocumentFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+  
+    if (!file.type.startsWith('application/pdf') && !file.type.startsWith('text/csv') && !file.type.includes('spreadsheetml') && !file.type.includes('excel')) {
+      toast({ variant: "destructive", title: "Invalid File Type", description: "Please upload a PDF, CSV, or Excel file." });
+      event.target.value = "";
+      return;
+    }
+  
+    const loaderKey = 'documentUpload';
+    setIsLoading(prev => ({ ...prev, [loaderKey]: true }));
+    setOutputData(null);
+  
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const dataUri = reader.result as string;
+      addToHistory(`Processing document: ${file.name}`);
+      
+      // Immediately call document analysis
+      const result = await handleDocumentUpload(dataUri);
+      if (result.success) {
+        setOutputData({ 
+          type: 'documentAnalysis', 
+          content: result.data as AnalyzeUploadedDocumentOutput,
+        });
+        toast({ title: "Document Analyzed", description: "Data extraction complete." });
+      } else {
+        setOutputData({ type: 'error', content: result.error });
+        toast({ variant: "destructive", title: "Document Analysis Error", description: result.error });
+      }
+      setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
+    };
+    reader.readAsDataURL(file);
+    event.target.value = ""; // Clear the input
   };
 
 
@@ -144,14 +180,10 @@ export default function DataCapturePage() {
     setIsLoading(prev => ({ ...prev, search: false }));
   };
 
-  useEffect(() => {
+ useEffect(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       console.warn('Speech Recognition API is not supported in this browser.');
-      toast({
-        variant: "destructive",
-        title: "Speech Recognition Not Supported",
-        description: "Your browser does not support the Speech Recognition API.",
-      });
+      // Do not toast here, let the button click handle user feedback if not supported
       return;
     }
 
@@ -159,7 +191,7 @@ export default function DataCapturePage() {
     recognitionRef.current = new SpeechRecognition();
     const recognition = recognitionRef.current;
     recognition.continuous = false; 
-    recognition.interimResults = true; 
+    recognition.interimResults = true;
 
     recognition.onstart = () => {
       setIsRecording(true);
@@ -176,24 +208,18 @@ export default function DataCapturePage() {
           interimTranscript += event.results[i][0].transcript;
         }
       }
-      // Display interim transcript for live feedback
       setOutputData({ type: 'text', content: interimTranscript || finalTranscript || 'Listening...', isFirebaseUrl: false }); 
       
       if (finalTranscript) {
-        setInputValue(finalTranscript); // Set final transcript to input field
-        // Do not stop recognition here, let it stop naturally or by user action
+        setInputValue(finalTranscript); 
       }
     };
 
     recognition.onend = () => {
       setIsRecording(false);
-       // If it ended and was just "Listening...", clear it.
-       // If there was a final transcript, inputValue should have it, outputData might have interim.
-       // We keep the last outputData content if it's not just "Listening..."
        if (outputData && outputData.type === 'text' && outputData.content === 'Listening...') {
            setOutputData(null);
        }
-       // If inputValue has content from speech, user can then click Search or modify it.
     };
 
     recognition.onerror = (event) => {
@@ -203,6 +229,8 @@ export default function DataCapturePage() {
         errorMessage = "Microphone permission denied. Please enable it in your browser settings.";
       } else if (event.error === 'no-speech') {
         errorMessage = "No speech detected. Please try again.";
+      } else if (event.error === 'aborted' && !isRecording) { // Handle case where it's aborted before starting
+        errorMessage = "Voice input was cancelled or an error occurred before starting.";
       }
       setOutputData({ type: 'error', content: errorMessage, isFirebaseUrl: false });
       toast({ variant: "destructive", title: "Speech Error", description: errorMessage });
@@ -217,32 +245,33 @@ export default function DataCapturePage() {
         streamRef.current = null;
       }
     };
-  // Rerun effect if outputData.content changes to 'Listening...' from outside to handle clearing correctly
-  }, [toast, outputData?.content === 'Listening...']);
+  }, [toast, outputData?.content]);
 
 
   const toggleVoiceRecording = () => {
     if (!recognitionRef.current) {
         toast({
             variant: "destructive",
-            title: "Speech Recognition Not Initialized",
-            description: "Cannot start voice recording.",
+            title: "Speech Recognition Not Supported",
+            description: "Your browser does not support voice input, or it failed to initialize.",
         });
         return;
     }
     if (isRecording) {
       recognitionRef.current.stop();
-      // onend will handle setIsRecording(false) and outputData clearing
     } else {
       try {
-        setOutputData(null); // Clear previous output before starting
-        setInputValue("");    // Clear previous input value
+        setOutputData(null); 
+        setInputValue("");    
         recognitionRef.current.start();
-        // onstart will set isRecording(true) and "Listening..."
       } catch (e) {
         console.error("Error starting speech recognition:", e);
-        toast({ variant: "destructive", title: "Speech Error", description: "Could not start voice recording." });
-        setIsRecording(false); // Ensure recording state is false if start fails
+        let description = "Could not start voice recording.";
+        if (e instanceof Error && e.name === 'InvalidStateError') {
+          description = "Voice recognition is already active or in an invalid state. Please try again shortly.";
+        }
+        toast({ variant: "destructive", title: "Speech Error", description });
+        setIsRecording(false); 
       }
     }
   };
@@ -251,7 +280,7 @@ export default function DataCapturePage() {
     if (typeof navigator.mediaDevices?.getUserMedia === 'undefined') {
       toast({ variant: "destructive", title: "Camera Not Supported", description: "Your browser does not support camera access." });
       setHasCameraPermission(false);
-      setCameraState('inactive');
+      setCameraStreamState('inactive');
       return;
     }
     setIsLoading(prev => ({ ...prev, cameraStart: true }));
@@ -260,12 +289,10 @@ export default function DataCapturePage() {
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Ensure video plays, handle potential errors from play()
         await videoRef.current.play();
         setHasCameraPermission(true);
-        setCameraState('active');
+        setCameraStreamState('active');
       } else {
-         // This should ideally not happen if videoRef is always in DOM
         throw new Error("Video element reference not found. Cannot display camera stream.");
       }
     } catch (err) {
@@ -290,7 +317,7 @@ export default function DataCapturePage() {
       }
       toast({ variant: "destructive", title: "Camera Error", description });
       setHasCameraPermission(false);
-      setCameraState('inactive');
+      setCameraStreamState('inactive');
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
@@ -310,13 +337,13 @@ export default function DataCapturePage() {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    setCameraState('inactive');
+    setCameraStreamState('inactive');
     setHasCameraPermission(null); 
   };
 
   const takePhoto = async () => {
-    if (cameraState !== 'active' || !videoRef.current || !canvasRef.current || !hasCameraPermission) {
-      if (!hasCameraPermission && cameraState !== 'inactive') {
+    if (cameraStreamState !== 'active' || !videoRef.current || !canvasRef.current || !hasCameraPermission) {
+      if (!hasCameraPermission && cameraStreamState !== 'inactive') {
         toast({ variant: "destructive", title: "Camera Permission", description: "Cannot take photo without camera permission."});
       }
       return;
@@ -360,7 +387,7 @@ export default function DataCapturePage() {
         } catch (error) {
           console.error("Error uploading to Firebase Storage:", error);
           toast({ variant: "destructive", title: "Upload Failed", description: "Could not store image in the cloud." });
-          setOutputData({ type: 'imagePreview', content: null, previewUrl: localDataUri, isFirebaseUrl: false }); // Revert to local URI on failure
+          setOutputData({ type: 'imagePreview', content: null, previewUrl: localDataUri, isFirebaseUrl: false }); 
         } finally {
           setIsLoading(prev => ({ ...prev, imageCaptureFirebase: false }));
         }
@@ -381,7 +408,6 @@ export default function DataCapturePage() {
 
   const handleDownloadCSV = (data: ExtractStructuredDataFromImageOutput | AnalyzeUploadedDocumentOutput | null) => {
     if (!data) return;
-    // Determine the source of table data based on the type
     const tableSource = (data as ExtractStructuredDataFromImageOutput).table || (data as AnalyzeUploadedDocumentOutput).extractedTable;
     
     if (!tableSource || !tableSource.headers || tableSource.headers.length === 0 || !tableSource.rows || tableSource.rows.length === 0) {
@@ -430,7 +456,6 @@ export default function DataCapturePage() {
     pdf.text("Extracted Data Report", margin, yPos);
     yPos += lineHeight * 2;
     
-    // Only include table data
     if (tableSource && tableSource.headers && tableSource.rows && tableSource.rows.length > 0) {
       const { headers, rows } = tableSource;
       pdf.setFontSize(12);
@@ -443,7 +468,6 @@ export default function DataCapturePage() {
         const headerLines = pdf.splitTextToSize(String(header), colWidth - 2);
         pdf.text(headerLines, margin + index * colWidth, yPos);
       });
-      // Estimate height taken by headers
       let headerMaxLines = 1;
       headers.forEach(h => {
           const lines = pdf.splitTextToSize(String(h), colWidth -2).length;
@@ -466,7 +490,6 @@ export default function DataCapturePage() {
           pdf.text("Structured Table Data (Continued)", margin, yPos);
           yPos += lineHeight * 1.5;
           pdf.setFontSize(8);
-          // Redraw headers on new page
           headers.forEach((header, index) => { 
             const headerLines = pdf.splitTextToSize(String(header), colWidth - 2);
             pdf.text(headerLines, margin + index * colWidth, yPos);
@@ -500,45 +523,42 @@ export default function DataCapturePage() {
   const renderOutput = () => {
     if (!outputData && !Object.values(isLoading).some(Boolean)) return null;
 
-    const isLoadingAnalysis = isLoading.imageAnalysis;
-    // const isLoadingDoc = isLoading.documentUpload; // No longer used directly for document upload button
+    const isLoadingAnalysis = isLoading.imageAnalysis || isLoading.documentUpload;
     const isLoadingFirebaseUpload = isLoading.imageCaptureFirebase;
     
-    const analysisData = outputData?.content as ExtractStructuredDataFromImageOutput | null;
-    const docData = outputData?.content as AnalyzeUploadedDocumentOutput | null; // Still used for type checking for download
+    const currentOutput = outputData?.content;
+    const tableSource = currentOutput?.table || currentOutput?.extractedTable;
+    const hasTableData = !!(tableSource && tableSource.headers && tableSource.headers.length > 0 && tableSource.rows && tableSource.rows.length > 0);
 
     const showDownloadButtons = 
-      outputData && !isLoadingAnalysis && !isLoadingFirebaseUpload && // !isLoadingDoc removed
-      (
-        (outputData.type === 'imageAnalysis' && analysisData && analysisData.table?.rows?.length > 0) ||
-        (outputData.type === 'documentAnalysis' && docData && docData.extractedTable?.rows?.length > 0) // For cases where doc analysis might still be triggered by other means
-      );
+      outputData && !isLoadingAnalysis && !isLoadingFirebaseUpload && hasTableData;
 
     const currentDataForDownload = outputData?.content;
 
 
     if (outputData?.type === 'imageAnalysis' && outputData.previewUrl) {
+      const analysisData = outputData.content as ExtractStructuredDataFromImageOutput | null;
       const tableData = analysisData?.table;
-      const hasTableData = !!(tableData && tableData.headers && tableData.headers.length > 0 && tableData.rows && tableData.rows.length > 0);
+      const currentHasTableData = !!(tableData && tableData.headers && tableData.headers.length > 0 && tableData.rows && tableData.rows.length > 0);
       
       return (
         <>
           <div className="flex flex-col md:flex-row md:gap-6 mb-4">
             <div className="md:w-1/3 mb-4 md:mb-0 flex flex-col items-center md:items-start">
               <p className="font-semibold mb-2 text-lg text-center md:text-left">
-                {isLoadingAnalysis || !analysisData ? "Extracting structured data..." : "Analyzed Image"}
+                {isLoading.imageAnalysis || !analysisData ? "Extracting structured data..." : "Analyzed Image"}
               </p>
               <Image src={outputData.previewUrl} alt="Analyzed preview" width={150} height={100} className="rounded-md border object-contain" data-ai-hint="document user content"/>
             </div>
 
             <div className="md:w-2/3">
               <h3 className="font-semibold mb-2 text-lg">Structured Data (Table Format)</h3>
-              {isLoadingAnalysis || !analysisData ? (
+              {isLoading.imageAnalysis || !analysisData ? (
                   <div className="space-y-2">
                       <Skeleton className="h-8 w-1/3" />
                       <Skeleton className="h-20 w-full" />
                   </div>
-              ) : hasTableData ? (
+              ) : currentHasTableData ? (
                 <DataTable headers={tableData.headers} rows={tableData.rows} />
               ) : (
                 <p className="text-muted-foreground">No structured table data extracted from the image.</p>
@@ -546,11 +566,9 @@ export default function DataCapturePage() {
             </div>
           </div>
           
-          {!(isLoadingAnalysis || !analysisData) && !hasTableData && (
+          {!(isLoading.imageAnalysis || !analysisData) && !currentHasTableData && (
              <p className="text-muted-foreground mt-4">No structured table data extracted from the image.</p>
           )}
-          
-          {/* Removed Full Extracted Text section for imageAnalysis */}
 
           {showDownloadButtons && (
             <div className="mt-6 flex gap-2">
@@ -566,30 +584,28 @@ export default function DataCapturePage() {
       );
     }
 
-    // This case is less likely to be hit via UI now, but kept for robustness if doc analysis is triggered some other way
     if (outputData?.type === 'documentAnalysis') {
+        const docData = outputData.content as AnalyzeUploadedDocumentOutput | null;
         const docTable = docData?.extractedTable;
-        const hasDocTableData = !!(docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows && docTable.rows.length > 0);
+        const currentHasDocTableData = !!(docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows && docTable.rows.length > 0);
 
         return (
            <div>
             <h3 className="font-semibold mb-2 text-lg">Extracted Document Table</h3>
-            {isLoading.documentUpload || !docData ? ( // isLoading.documentUpload might be unused but kept for safety
+            {isLoading.documentUpload || !docData ? (
                <div className="space-y-2">
                   <Skeleton className="h-8 w-1/3" />
                   <Skeleton className="h-20 w-full" />
               </div>
-            ) : hasDocTableData ? (
+            ) : currentHasDocTableData ? (
               <DataTable headers={docTable.headers} rows={docTable.rows} />
             ) : (
                <p className="text-muted-foreground">No structured table data extracted from the document.</p>
             )}
             
-            {!(isLoading.documentUpload || !docData) && !hasDocTableData && (
+            {!(isLoading.documentUpload || !docData) && !currentHasDocTableData && (
                <p className="text-muted-foreground mt-4">No structured table data extracted from the document.</p>
             )}
-
-            {/* Removed Full Extracted Text section for documentAnalysis */}
 
             {showDownloadButtons && (
                 <div className="mt-6 flex gap-2">
@@ -606,10 +622,10 @@ export default function DataCapturePage() {
     }
 
     if (!outputData) { 
-        if (isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoadingAnalysis || isLoading.search || isLoading.cameraStart) {
+        if (isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.search || isLoading.cameraStart) {
             const message = isLoading.imageCaptureFirebase ? "Uploading image to cloud..." : 
                             isLoading.cameraStart ? "Starting camera..." : 
-                            isLoadingAnalysis ? "Analyzing data..." : // Simplified message
+                            (isLoading.imageAnalysis || isLoading.documentUpload) ? "Extracting structured data..." :
                             isLoading.search ? "Searching..." :
                             "Processing...";
             return (
@@ -633,8 +649,8 @@ export default function DataCapturePage() {
         {outputData.previewUrl && outputData.type !== 'imageAnalysis' && outputData.type !== 'documentAnalysis' && ( 
           <div className="mb-4 flex flex-col items-center md:items-start">
             <p className="font-semibold mb-2 text-lg text-center md:text-left">
-              {outputData.type === 'imagePreview' && !isLoadingAnalysis && !isLoadingFirebaseUpload ? "Preview" :
-               (outputData.type === 'imagePreview' && isLoadingAnalysis) ? "Analyzing data..." : 
+              {outputData.type === 'imagePreview' && !isLoading.imageAnalysis && !isLoadingFirebaseUpload ? "Preview" :
+               (outputData.type === 'imagePreview' && isLoading.imageAnalysis) ? "Extracting structured data..." : 
                (outputData.type === 'imagePreview' && isLoadingFirebaseUpload) ? "Uploading to Cloud..." :
                outputData.type === 'error' ? "Image with Error" :
                "Image"
@@ -650,8 +666,8 @@ export default function DataCapturePage() {
 
         {showImageActions && (
           <div className="flex gap-2 mb-4">
-            <Button onClick={handleImageAnalysis} disabled={isLoadingAnalysis || isLoadingFirebaseUpload}>
-              {isLoadingAnalysis ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+            <Button onClick={handleImageAnalysis} disabled={isLoading.imageAnalysis || isLoadingFirebaseUpload}>
+              {isLoading.imageAnalysis ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
               Extract Table Data
             </Button>
           </div>
@@ -662,11 +678,11 @@ export default function DataCapturePage() {
             case 'text':
               return <p className="text-foreground whitespace-pre-wrap">{outputData.content}</p>;
             case 'imageAnalysis': 
-            case 'documentAnalysis': // Fallthrough, already handled by specific layouts above
-              if (isLoadingAnalysis || isLoading.documentUpload || (!outputData.content && (isLoading.imageUpload || isLoading.imageCaptureFirebase))) {
+            case 'documentAnalysis': 
+              if (isLoadingAnalysis || (!outputData.content && (isLoading.imageUpload || isLoadingFirebaseUpload))) {
                  return ( 
                     <div>
-                        <p className="font-semibold mb-2 text-lg">{isLoadingAnalysis ? "Analyzing data..." : "Processing..."}</p>
+                        <p className="font-semibold mb-2 text-lg">{isLoadingAnalysis ? "Extracting structured data..." : "Processing..."}</p>
                         <div className="space-y-2">
                             <Skeleton className="h-8 w-1/3" />
                             <Skeleton className="h-20 w-full" />
@@ -679,10 +695,10 @@ export default function DataCapturePage() {
               if (isLoading.imageUpload || isLoadingFirebaseUpload) {
                 return <p>{isLoadingFirebaseUpload ? "Uploading to cloud..." : "Processing image..."}</p>;
               }
-              if (isLoadingAnalysis) { 
+              if (isLoading.imageAnalysis) { 
                 return ( 
                     <div>
-                        <p className="font-semibold mb-2 text-lg">Analyzing data...</p>
+                        <p className="font-semibold mb-2 text-lg">Extracting structured data...</p>
                         <div className="space-y-2">
                             <Skeleton className="h-8 w-1/3" />
                             <Skeleton className="h-20 w-full" />
@@ -718,7 +734,7 @@ export default function DataCapturePage() {
     <>
       <div className="container mx-auto p-4 flex-grow">
         <div className="w-full flex flex-col lg:flex-row lg:gap-8 items-start">
-          <div className="flex flex-col gap-6 w-full lg:w-2/5"> {/* lg:w-2/5 for left column */}
+          <div className="flex flex-col gap-6 w-full lg:w-2/5">
             <Card className="w-full shadow-lg">
               <CardHeader>
                 <CardTitle>History</CardTitle>
@@ -751,8 +767,6 @@ export default function DataCapturePage() {
                       </Button>
                       <input type="file" ref={imageInputRef} onChange={handleImageFileChange} accept="image/*" className="hidden" />
 
-                      {/* Document upload button removed */}
-
                       <Button onClick={toggleVoiceRecording} variant={isRecording ? "destructive" : "default"} disabled={!recognitionRef.current} className="flex-grow sm:flex-grow-0">
                       {isRecording ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
                       {isRecording ? 'Stop Voice' : 'Start Voice'}
@@ -760,14 +774,13 @@ export default function DataCapturePage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2 justify-center">
-                    {cameraState === 'inactive' && (
+                    {cameraStreamState === 'inactive' && (
                         <Button onClick={startCamera} disabled={isLoading.cameraStart} className="flex-grow sm:flex-grow-0">
                             {isLoading.cameraStart ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Video className="mr-2 h-4 w-4" />} Start Camera
                         </Button>
                     )}
-                    {cameraState === 'active' && (
+                    {cameraStreamState === 'active' && (
                         <>
-                            {/* Pause Camera button removed */}
                             <Button onClick={takePhoto} disabled={isLoading.imageCaptureFirebase || isLoading.imageAnalysis || !hasCameraPermission} className="flex-grow sm:flex-grow-0 bg-green-600 hover:bg-green-700 text-white">
                                 {isLoading.imageCaptureFirebase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CameraIcon className="mr-2 h-4 w-4" />}
                                 Take Photo
@@ -777,7 +790,6 @@ export default function DataCapturePage() {
                             </Button>
                         </>
                     )}
-                    {/* Resume Camera button removed */}
                    
                   </div>
 
@@ -802,24 +814,24 @@ export default function DataCapturePage() {
               <CardHeader>
                 <CardTitle>
                   Live Camera Feed 
-                  {cameraState === 'active' && !hasCameraPermission && ' (Permission Issue)'}
-                  {cameraState === 'inactive' && ' (Inactive)'}
+                  {cameraStreamState === 'active' && !hasCameraPermission && ' (Permission Issue)'}
+                  {cameraStreamState === 'inactive' && ' (Inactive)'}
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-4 space-y-4">
                 <video ref={videoRef} playsInline autoPlay muted className={cn(
                     "w-full h-auto aspect-video bg-muted rounded-md border",
-                    cameraState === 'inactive' && 'hidden' 
+                    cameraStreamState === 'inactive' && 'hidden' 
                 )} />
                 <canvas ref={canvasRef} className="hidden" /> 
                 
-                {cameraState === 'inactive' && (hasCameraPermission === null || hasCameraPermission === true) && (
+                {cameraStreamState === 'inactive' && (hasCameraPermission === null || hasCameraPermission === true) && (
                   <div className="flex items-center justify-center h-40 bg-muted/50 rounded-md border border-dashed">
                     <Video className="h-10 w-10 text-muted-foreground" />
                     <p className="ml-2 text-muted-foreground">Camera is off. Click "Start Camera" to activate.</p>
                   </div>
                 )}
-                {cameraState === 'active' && hasCameraPermission === false && (
+                {cameraStreamState === 'active' && hasCameraPermission === false && (
                   <Alert variant="destructive" className="rounded-md">
                     <AlertTriangle className="h-4 w-4" />
                     <AlertTitle>Camera Access Required</AlertTitle>
@@ -832,14 +844,14 @@ export default function DataCapturePage() {
             </Card>
           </div>
 
-          <div className="w-full lg:w-3/5"> {/* lg:w-3/5 for right column */}
-            {(outputData || isLoading.imageAnalysis || isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoading.search || isLoading.cameraStart) && (
+          <div className="w-full lg:w-3/5"> 
+            {(outputData || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoading.search || isLoading.cameraStart) && (
               <Card className="w-full shadow-lg mt-6 lg:mt-0">
                 <CardHeader>
                   <CardTitle>Result</CardTitle>
                 </CardHeader>
                 <CardContent>
-                   <ScrollArea className="max-h-[120rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-4rem)] p-1">
+                   <ScrollArea className="max-h-[150rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-2rem)] p-1">
                    {renderOutput()}
                   </ScrollArea>
                 </CardContent>
