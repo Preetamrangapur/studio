@@ -62,6 +62,8 @@ export default function DataCapturePage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
+
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -87,6 +89,34 @@ export default function DataCapturePage() {
     };
     reader.readAsDataURL(file);
     event.target.value = ""; 
+  };
+
+  const handleDocumentFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+  
+    const loaderKey = 'documentUpload';
+    setIsLoading(prev => ({ ...prev, [loaderKey]: true }));
+    setOutputData(null);
+  
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const dataUri = reader.result as string;
+      addToHistory(`Uploaded document: ${file.name}`);
+      
+      // Directly call handleDocumentUpload action
+      const result = await handleDocumentUpload(dataUri);
+      if (result.success) {
+        setOutputData({ type: 'documentAnalysis', content: result.data as AnalyzeUploadedDocumentOutput, isFirebaseUrl: false });
+        toast({ title: "Document Analyzed", description: "Data extraction complete." });
+      } else {
+        setOutputData({ type: 'error', content: result.error, isFirebaseUrl: false });
+        toast({ variant: "destructive", title: "Document Analysis Error", description: result.error });
+      }
+      setIsLoading(prev => ({ ...prev, [loaderKey]: false }));
+    };
+    reader.readAsDataURL(file);
+    event.target.value = ""; // Clear the input
   };
 
   const handleImageAnalysis = async () => {
@@ -144,6 +174,8 @@ export default function DataCapturePage() {
  useEffect(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       console.warn('Speech Recognition API is not supported in this browser.');
+      // Optionally, disable the voice input button or show a toast message
+      if (recognitionRef) recognitionRef.current = null; // Ensure it's null if not supported
       return;
     }
 
@@ -170,7 +202,6 @@ export default function DataCapturePage() {
           interimTranscript += event.results[i][0].transcript;
         }
       }
-      // Display interim results, but keep "Listening..." if final is not yet available and interim is empty
       const currentDisplay = interimTranscript || (finalTranscript ? finalTranscript : 'Listening...');
       setOutputData({ type: 'text', content: currentDisplay, isFirebaseUrl: false }); 
       
@@ -181,10 +212,8 @@ export default function DataCapturePage() {
 
     recognition.onend = () => {
       setIsRecording(false);
-      // Use functional updates to safely access latest state
       setInputValue(currentInputValue => {
         setOutputData(currentOutputData => {
-          // Clear "Listening..." or "Initializing..." if no speech was captured and these were the last messages
           if (currentInputValue === '' && currentOutputData && currentOutputData.type === 'text' && 
               (currentOutputData.content === 'Listening...' || currentOutputData.content === 'Initializing voice input...')) {
             return null; 
@@ -203,7 +232,7 @@ export default function DataCapturePage() {
       } else if (event.error === 'no-speech') {
         errorMessage = "No speech detected. Please try again.";
       } else if (event.error === 'aborted') {
-        errorMessage = "Voice input was cancelled or an unexpected error occurred.";
+         errorMessage = "Voice input cancelled or an unexpected error occurred.";
       } else {
         errorMessage = `Voice input error: ${event.message || event.error}. Try again.`;
       }
@@ -211,7 +240,7 @@ export default function DataCapturePage() {
       toast({ variant: "destructive", title: "Speech Error", description: errorMessage });
       setIsRecording(false);
     };
-     // Cleanup
+    
     return () => {
       if (recognitionRef.current) {
         recognitionRef.current.abort();
@@ -225,6 +254,7 @@ export default function DataCapturePage() {
         streamRef.current = null;
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
 
@@ -512,8 +542,7 @@ export default function DataCapturePage() {
     const currentOutputContent = outputData?.content;
     const tableSource = currentOutputContent?.table || currentOutputContent?.extractedTable;
     const hasTableData = !!(tableSource && tableSource.headers && tableSource.headers.length > 0 && tableSource.rows && tableSource.rows.length > 0);
-    const fullTextContent = currentOutputContent?.fullText;
-
+    
     const showDownloadButtons = 
       outputData && !isLoadingAnalysis && !isLoadingFirebaseUpload && hasTableData;
 
@@ -530,7 +559,7 @@ export default function DataCapturePage() {
           <div className="flex flex-col md:flex-row md:gap-6 mb-4">
             <div className="md:w-1/3 mb-4 md:mb-0 flex flex-col items-center md:items-start">
               <p className="font-semibold mb-2 text-lg text-center md:text-left">
-                {isLoading.imageAnalysis || !analysisData ? "Extracting structured data..." : "Analyzed Image"}
+                {isLoading.imageAnalysis || !analysisData ? "Analyzing data..." : "Analyzed Image"}
               </p>
               <Image src={outputData.previewUrl} alt="Analyzed preview" width={150} height={100} className="rounded-md border object-contain" data-ai-hint="document user content"/>
             </div>
@@ -573,7 +602,6 @@ export default function DataCapturePage() {
         const docTable = docData?.extractedTable;
         const currentHasDocTableData = !!(docTable && docTable.headers && docTable.headers.length > 0 && docTable.rows && docTable.rows.length > 0);
 
-
         return (
            <div>
             <h3 className="font-semibold mb-2 text-lg">Extracted Document Table</h3>
@@ -610,7 +638,7 @@ export default function DataCapturePage() {
         if (isLoading.imageUpload || isLoading.imageCaptureFirebase || isLoading.imageAnalysis || isLoading.documentUpload || isLoading.search || isLoading.cameraStart) {
             const message = isLoading.imageCaptureFirebase ? "Uploading image to cloud..." : 
                             isLoading.cameraStart ? "Starting camera..." : 
-                            (isLoading.imageAnalysis || isLoading.documentUpload) ? "Extracting structured data..." :
+                            (isLoading.imageAnalysis || isLoading.documentUpload) ? "Analyzing data..." :
                             isLoading.search ? "Searching..." :
                             "Processing...";
             return (
@@ -635,7 +663,7 @@ export default function DataCapturePage() {
           <div className="mb-4 flex flex-col items-center md:items-start">
             <p className="font-semibold mb-2 text-lg text-center md:text-left">
               {outputData.type === 'imagePreview' && !isLoading.imageAnalysis && !isLoadingFirebaseUpload ? "Preview" :
-               (outputData.type === 'imagePreview' && isLoading.imageAnalysis) ? "Extracting structured data..." : 
+               (outputData.type === 'imagePreview' && isLoading.imageAnalysis) ? "Analyzing data..." : 
                (outputData.type === 'imagePreview' && isLoadingFirebaseUpload) ? "Uploading to Cloud..." :
                outputData.type === 'error' ? "Image with Error" :
                "Image"
@@ -667,7 +695,7 @@ export default function DataCapturePage() {
               if (isLoadingAnalysis || (!outputData.content && (isLoading.imageUpload || isLoadingFirebaseUpload))) {
                  return ( 
                     <div>
-                        <p className="font-semibold mb-2 text-lg">{isLoadingAnalysis ? "Extracting structured data..." : "Processing..."}</p>
+                        <p className="font-semibold mb-2 text-lg">{isLoadingAnalysis ? "Analyzing data..." : "Processing..."}</p>
                         <div className="space-y-2">
                             <Skeleton className="h-8 w-1/3" />
                             <Skeleton className="h-20 w-full" />
@@ -683,7 +711,7 @@ export default function DataCapturePage() {
               if (isLoading.imageAnalysis) { 
                 return ( 
                     <div>
-                        <p className="font-semibold mb-2 text-lg">Extracting structured data...</p>
+                        <p className="font-semibold mb-2 text-lg">Analyzing data...</p>
                         <div className="space-y-2">
                             <Skeleton className="h-8 w-1/3" />
                             <Skeleton className="h-20 w-full" />
@@ -719,7 +747,8 @@ export default function DataCapturePage() {
     <>
       <div className="container mx-auto p-4 flex-grow">
         <div className="w-full flex flex-col lg:flex-row lg:gap-8 items-start">
-          <div className="flex flex-col gap-6 w-full lg:w-2/5"> {/* Left column */}
+          {/* Left Column: Takes 2/5 width on lg screens, full width otherwise */}
+          <div className="flex flex-col gap-6 w-full lg:w-2/5"> 
             <Card className="w-full shadow-lg">
               <CardHeader>
                 <CardTitle>History</CardTitle>
@@ -751,6 +780,13 @@ export default function DataCapturePage() {
                       Upload Image
                       </Button>
                       <input type="file" ref={imageInputRef} onChange={handleImageFileChange} accept="image/*" className="hidden" />
+
+                      {/* <Button onClick={() => documentInputRef.current?.click()} disabled={isLoading.documentUpload} className="flex-grow sm:flex-grow-0">
+                        {isLoading.documentUpload ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                        Upload Document
+                      </Button> */}
+                      <input type="file" ref={documentInputRef} onChange={handleDocumentFileChange} accept=".pdf,.csv,.xls,.xlsx" className="hidden" />
+
 
                       <Button onClick={toggleVoiceRecording} variant={isRecording ? "destructive" : "default"} disabled={!recognitionRef.current}  className="flex-grow sm:flex-grow-0">
                       {isRecording ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
@@ -833,6 +869,7 @@ export default function DataCapturePage() {
             </Card>
           </div>
 
+          {/* Right Column: Takes 3/5 width on lg screens, full width otherwise. Only shows if there's output or loading state */}
           { (outputData || Object.values(isLoading).some(Boolean)) && (
             <div className="w-full lg:w-3/5 mt-6 lg:mt-0"> 
               <Card className="w-full shadow-lg">
@@ -840,7 +877,7 @@ export default function DataCapturePage() {
                   <CardTitle>Result</CardTitle>
                 </CardHeader>
                 <CardContent>
-                   <ScrollArea className="max-h-[150rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem)-2rem)] p-1">
+                   <ScrollArea className="max-h-[200rem] lg:max-h-[calc(100vh-var(--navbar-height,4rem))] p-1">
                    {renderOutput()}
                   </ScrollArea>
                 </CardContent>
